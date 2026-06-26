@@ -1,6 +1,4 @@
-看到问题了。新加的"语言切换"内容被放到了整个 markdown 代码块**外面**，而且代码块也没有闭合。
 
-这是修好的完整 README.md，直接覆盖替换：
 
 ```markdown
 # ComfyUI-Workflow-Tools
