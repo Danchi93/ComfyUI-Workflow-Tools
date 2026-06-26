@@ -1,5 +1,6 @@
 import os, json
 import comfy.utils, comfy.sd, folder_paths
+from .prompt_segments import PromptSegments
 
 class MultiLoraLoader:
     @classmethod
@@ -35,6 +36,12 @@ class MultiLoraLoader:
 
         return (model,)
 
-NODE_CLASS_MAPPINGS = {"MultiLoraLoader": MultiLoraLoader}
-NODE_DISPLAY_NAME_MAPPINGS = {"MultiLoraLoader": "Multi LoRA Loader"}
+NODE_CLASS_MAPPINGS = {
+    "MultiLoraLoader": MultiLoraLoader,
+    "PromptSegments": PromptSegments,
+}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "MultiLoraLoader": "Multi LoRA Loader",
+    "PromptSegments": "Prompt Segments",
+}
 WEB_DIRECTORY = "."
