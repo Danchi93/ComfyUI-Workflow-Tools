@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 
-const LANG = "zh";
+const LANG = "en";
 const I18N = {
     en: { label_ph: "Label...", add: "＋ Add Segment", default_label: "Quality Tags",
           seg_ph: (i) => `Enter segment ${i} prompt...` },
