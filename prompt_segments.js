@@ -1,8 +1,6 @@
 import { app } from "../../scripts/app.js";
 
-// Change "en" to "zh" to switch to Chinese，下面一行的"en"改成"zh"即可切换中文
-const LANG = "en";
-
+const LANG = "zh";
 const I18N = {
     en: { label_ph: "Label...", add: "＋ Add Segment", default_label: "Quality Tags",
           seg_ph: (i) => `Enter segment ${i} prompt...` },
@@ -15,6 +13,55 @@ app.registerExtension({
     name: "PromptSegments",
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== "PromptSegments") return;
+
+        nodeType.prototype._calcHeight = function () {
+            const LINE_H = 18, PADDING = 20, TOP_ROW = 30, SEG_GAP = 5, NODE_CHROME = 54;
+            let h = NODE_CHROME;
+            this._segments.forEach(seg => {
+                const lines = Math.max(1, (seg.text.match(/\n/g) || []).length + 1);
+                h += TOP_ROW + Math.max(64, lines * LINE_H + PADDING) + SEG_GAP;
+            });
+            return h + 36;
+        };
+
+        nodeType.prototype._applySize = function () {
+            this._domWidget.element.style.height = "auto";
+            this._domWidget.computeSize = () => [0, -4];
+            requestAnimationFrame(() => {
+                const domH = this._segContainer.scrollHeight;
+                // When the node is off-screen or zoomed too small, ComfyUI hides
+                // the DOM widget (display:none), which makes scrollHeight return 0.
+                if (!domH || domH <= 0) {
+                    // No reliable layout info. If we already have a measured size,
+                    // keep it (don't collapse). Otherwise fall back to a content
+                    // based estimate so a brand-new hidden node still gets a size.
+                    if (!this._minH) {
+                        const h = this._calcHeight();
+                        this._minH = h;
+                        this.size[1] = h;
+                        app.graph.setDirtyCanvas(true, true);
+                    }
+                    return;
+                }
+                const h = domH + 50;
+                this._minH = h;
+                this.size[1] = h;
+                app.graph.setDirtyCanvas(true, true);
+            });
+        };
+
+        // Re-measure every textarea + node size. Used when the node becomes visible
+        // again after having been hidden during a render (e.g. page load or undo
+        // while off-screen), since the initial measurement ran while hidden.
+        nodeType.prototype._remeasure = function () {
+            if (!this._segContainer) return;
+            this._segContainer.querySelectorAll("textarea").forEach(ta => {
+                ta.style.height = "auto";
+                const sh = ta.scrollHeight;
+                if (sh && sh > 0) ta.style.height = sh + "px";
+            });
+            this._applySize();
+        };
 
         nodeType.prototype._render = function () {
             const container = this._segContainer;
@@ -35,8 +82,7 @@ app.registerExtension({
                 toggle.style.cssText = "width:14px;height:14px;cursor:pointer;accent-color:#4a9eff;flex-shrink:0;";
                 toggle.onchange = () => {
                     seg.enabled = toggle.checked;
-                    updateRowStyle();
-                    top.style.background = seg.enabled ? "#2d2d3d" : "#252525";
+                    updateRowStyle();top.style.background = seg.enabled ? "#2d2d3d" : "#252525";
                     top.style.borderLeftColor = seg.enabled ? "#4a9eff" : "#555";
                     row.style.borderColor = seg.enabled ? "#3a3a4a" : "#2a2a2a";
                     this._sync();
@@ -66,8 +112,15 @@ app.registerExtension({
                 ta.onfocus = () => { ta.style.background = "#1c1c28"; };
                 ta.onblur = () => { ta.style.background = "#181820"; };
 
-                const autoResize = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
-                ta.oninput = () => { seg.text = ta.value; autoResize(); this._applySize(); this._sync(); };
+                const autoResize = () => {
+                    ta.style.height = "auto";
+                    // scrollHeight is 0 while the widget DOM is hidden
+                    // (off-screen / zoomed out); skip so we don't collapse it.
+                    const sh = ta.scrollHeight;
+                    if (sh && sh > 0) ta.style.height = sh + "px";
+                    this._applySize();
+                };
+                ta.oninput = () => { seg.text = ta.value; autoResize(); this._sync(); };
                 requestAnimationFrame(autoResize);
 
                 row.append(top, ta);
@@ -84,18 +137,6 @@ app.registerExtension({
 
             this._applySize();
         };
-
-nodeType.prototype._applySize = function () {
-    this._domWidget.element.style.height = "auto";
-    this._domWidget.computeSize = () => [0, -4];
-    requestAnimationFrame(() => {
-        const domH = this._segContainer.scrollHeight;
-        const h = domH + 50; // 固定 overhead：节点标题栏 + prompt 输出槽
-        this._minH = h;
-        this.size[1] = h;
-        app.graph.setDirtyCanvas(true, true);
-    });
-};
 
         nodeType.prototype._sync = function () {
             if (this._rawWidget) this._rawWidget.value = JSON.stringify(this._segments);
@@ -120,18 +161,55 @@ nodeType.prototype._applySize = function () {
                 if (this._minH && size[1] < this._minH) size[1] = this._minH;
             };
 
+            // Watch for the node re-entering the viewport. If a render happened
+            // while the widget DOM was hidden (off-screen / heavily zoomed out,
+            // e.g. on page load or right after an undo), scrollHeight was 0 and
+            // the textareas never expanded. Re-measure on each hidden->visible
+            // transition. The observer stays alive for the node's lifetime so it
+            // also catches later undos that re-render while the node is off-screen.
+            this._wasVisible = false;
+            if ("IntersectionObserver" in window) {
+                this._visObserver = new IntersectionObserver((entries) => {
+                    for (const e of entries) {
+                        // Only act on a hidden -> visible transition, so we don't
+                        // re-measure on every visible frame (which would be wasteful
+                        // and could fight the user while typing / dragging).
+                        if (e.isIntersecting && !this._wasVisible) {
+                            this._remeasure();
+                        }
+                        this._wasVisible = e.isIntersecting;
+                    }
+                }, { threshold: 0 });
+                // observe on next frame so the DOM widget element is attached
+                requestAnimationFrame(() => {
+                    if (this._visObserver && this._domWidget?.element) {
+                        this._visObserver.observe(this._domWidget.element);
+                    }
+                });
+            }
+
             requestAnimationFrame(() => this._render());
         };
 
         const onSerialize = nodeType.prototype.onSerialize;
         nodeType.prototype.onSerialize = function (o) {
             onSerialize?.apply(this, arguments);
-            o.prompt_segments = this._segments;};
+            o.prompt_segments = this._segments;
+        };
+
+        const onRemoved = nodeType.prototype.onRemoved;
+        nodeType.prototype.onRemoved = function () {
+            onRemoved?.apply(this, arguments);
+            if (this._visObserver) { this._visObserver.disconnect(); this._visObserver = null; }
+        };
 
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (o) {
             onConfigure?.apply(this, arguments);
-            if (o.prompt_segments) { this._segments = o.prompt_segments; this._render(); }
+            if (o.prompt_segments) {
+                this._segments = o.prompt_segments;
+                requestAnimationFrame(() => this._render());
+            }
         };
     }
 });
