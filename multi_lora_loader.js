@@ -15,7 +15,8 @@ const T = I18N[LANG] ?? I18N.en;
 
 
 const ROW_H = 30;
-const PAD = 10;
+const PAD = 10;          // 底板/整体距节点边界
+const INNER_PAD = 4;     // 底板内：内容（开关/输入框/删除）距底板边缘的呼吸空间
 const HEADER_H = 22;
 const STRENGTH_W = 62;
 const TOGGLE_W = 32;   // 给胶囊留足够宽度
@@ -30,7 +31,8 @@ const GAP = 5;
 const TOG_W = 28, TOG_H = 16;
 
 function colWidths(totalW) {
-    const avail = totalW - PAD * 2 - TOGGLE_W - STRENGTH_W - DEL_W - 4 * GAP;
+    // 内容区比底板再多缩进 INNER_PAD*2，让开关/删除按钮不贴底板边缘
+    const avail = totalW - (PAD + INNER_PAD) * 2 - TOGGLE_W - STRENGTH_W - DEL_W - 4 * GAP;
     const noteW = Math.floor(avail * NOTE_RATIO);
     return [TOGGLE_W, avail - noteW, STRENGTH_W, noteW, DEL_W];
 }
@@ -115,7 +117,7 @@ function makeHeaderWidget() {
         computeSize(ww) { return [ww, HEADER_H]; },
         draw(ctx, node, ww, y) {
             const cols = colWidths(ww);
-            let x = PAD;
+            let x = PAD + INNER_PAD;
             ctx.fillStyle = "#606060";
             ctx.font = "10px sans-serif";
             ctx.textBaseline = "middle";
@@ -144,7 +146,8 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
                 row.enabled ? "#1a2a1a" : "#271818",
                 row.enabled ? "#2d5a2d" : "#5a2d2d");
 
-            let x = PAD;
+            // 内容从底板内 INNER_PAD 处开始，开关/删除按钮不再贴底板边缘
+            let x = PAD + INNER_PAD;
 
             // 修复2：胶囊严格居中在TOGGLE_W列内，不超出
             const tx = x + (cols[0] - TOG_W) / 2;
@@ -206,7 +209,7 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             const y = this._lastY || 0;
             if (my < y || my > y + ROW_H + 6) return false;
             const cols = colWidths(ww);
-            let x = PAD;
+            let x = PAD + INNER_PAD;
             if (mx >= x && mx < x + cols[0]) { row.enabled = !row.enabled; onchange(); return true; }
             x += cols[0] + GAP;
             if (mx >= x && mx < x + cols[1]) {

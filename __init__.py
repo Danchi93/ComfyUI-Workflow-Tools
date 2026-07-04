@@ -1,6 +1,7 @@
 import os, json
 import comfy.utils, comfy.sd, folder_paths
 from .prompt_segments import PromptSegments
+from .resolution_switcher import ResolutionSwitcher
 
 class MultiLoraLoader:
     @classmethod
@@ -39,9 +40,11 @@ class MultiLoraLoader:
 NODE_CLASS_MAPPINGS = {
     "MultiLoraLoader": MultiLoraLoader,
     "PromptSegments": PromptSegments,
+    "ResolutionSwitcher": ResolutionSwitcher,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "MultiLoraLoader": "Multi LoRA Loader",
     "PromptSegments": "Prompt Segments",
+    "ResolutionSwitcher": "Resolution Switcher",
 }
 WEB_DIRECTORY = "."

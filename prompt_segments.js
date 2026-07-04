@@ -3,9 +3,9 @@ import { app } from "../../scripts/app.js";
 const LANG = "en";
 const I18N = {
     en: { label_ph: "Label...", add: "＋ Add Segment", default_label: "Quality Tags",
-          seg_ph: (i) => `Enter segment ${i} prompt...` },
+          seg_ph: (i) => `Enter segment ${i} prompt...`, order_tip: "Change order (move this segment)" },
     zh: { label_ph: "备注标签...", add: "＋ 添加段落", default_label: "质量词",
-          seg_ph: (i) => `输入第 ${i} 段提示词...` },
+          seg_ph: (i) => `输入第 ${i} 段提示词...`, order_tip: "修改顺序（移动此段落）" },
 };
 const T = I18N[LANG] ?? I18N.en;
 
@@ -88,9 +88,32 @@ app.registerExtension({
                     this._sync();
                 };
 
-                const labelNum = document.createElement("span");
-                labelNum.textContent = `#${i + 1}`;
-                labelNum.style.cssText = "color:#666;font-size:10px;flex-shrink:0;font-family:monospace;";
+                const labelNum = document.createElement("input");
+                labelNum.type = "text";
+                labelNum.value = i + 1;
+                labelNum.title = T.order_tip;
+                labelNum.style.cssText = "color:#aaa;font-size:11px;flex-shrink:0;font-family:monospace;width:26px;text-align:center;background:#1a1a22;border:1px solid #333344;border-radius:4px;padding:1px 0;outline:none;box-sizing:content-box;";
+                labelNum.onfocus = () => { labelNum.style.borderColor = "#4a9eff"; labelNum.style.color = "#fff"; labelNum.select(); };
+                labelNum.onblur = () => { labelNum.style.borderColor = "#333344"; labelNum.style.color = "#aaa"; };
+                labelNum.onchange = () => {
+                    const raw = labelNum.value.trim();
+                    const parsed = parseFloat(raw);
+                    const total = this._segments.length;
+                    const current = i + 1;
+                    // Clamping (no rejection), mirroring native ComfyUI inputs
+                    // (sampler steps, lora strength): invalid -> keep original.
+                    if (!Number.isFinite(parsed)) { labelNum.value = current; return; }
+                    let target = Math.round(parsed);
+                    if (target <= 0) target = 1;
+                    if (target > total) target = total;
+                    if (target === current) { labelNum.value = current; return; }
+                    // Move-insert: lift the whole segment object (text/label/enabled
+                    // travel with it) and insert at the new position.
+                    const item = this._segments.splice(i, 1)[0];
+                    this._segments.splice(target - 1, 0, item);
+                    this._sync();
+                    this._render();
+                };
 
                 const label = document.createElement("input");
                 label.type = "text"; label.value = seg.label; label.placeholder = T.label_ph;
