@@ -70,6 +70,33 @@ const LANG = "zh";  // "en" for English, "zh" for Chinese
 
 ---
 
+## Resolution Switcher
+
+Quickly switch between pre-configured resolutions without manually re-typing dimensions every time. It outputs a blank latent image with the selected size.
+
+![preview3](images/preview3.png)
+
+### Features
+
+- Pre-define multiple resolution presets (Width, Height, and Batch Size)
+- Switch between resolutions instantly using toggle switches
+- Dynamically add or remove resolution presets
+- Eliminates the need to repeatedly input dimensions when testing different aspect ratios
+
+### Usage
+
+Add the **Resolution Switcher** node in your workflow. Pre-set your frequently used dimensions, toggle the one you want to use, and connect the **Latent** output to your KSampler or any node that accepts latent input.
+
+### Language
+
+The UI defaults to English. To switch to Chinese, open `resolution_switcher.js` and change line 4:
+
+```js
+const LANG = "zh";  // "en" for English, "zh" for Chinese
+
+
+---
+
 ## 中文介绍
 
 本仓库包含多个 ComfyUI 自定义节点。
@@ -134,3 +161,32 @@ const LANG = "zh";  // "en" 为英文，"zh" 为中文
 ```js
 const LANG = "zh";  // "en" 为英文，"zh" 为中文
 ```
+
+
+
+```markdown
+---
+
+### Resolution Switcher
+
+快速在预设的分辨率之间进行切换，解决原版在切换画幅时需要反复手动输入数值的问题。该节点直接输出对应尺寸的空 Latent（潜空间）。
+
+![preview3](images/preview3.png)
+
+#### 功能特性
+
+- 提前预设多组常用分辨率组合（包含宽度 W、高度 H 及 批处理 数量）
+- 通过开关一键快速切换当前生效的分辨率
+- 支持动态添加或删除分辨率预设（点击 `+ Add Resolution` 增加，点击 `X` 删除）
+- 告别在测试不同横竖屏比例时频繁修改分辨率的繁琐操作
+
+#### 使用方法
+
+在工作流中添加 **Resolution Switcher** 节点，输入你常用的几种分辨率组合，开启你需要使用的那一行，然后将 **Latent** 输出连接到 KSampler（K采样器）或其他接受 Latent 输入的节点即可。
+
+#### 语言切换
+
+界面默认显示英文。如需切换中文，打开 `resolution_switcher.js`，修改第 4 行：
+
+```js
+const LANG = "zh";  // "en" 为英文，"zh" 为中文
