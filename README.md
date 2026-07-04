@@ -1,4 +1,3 @@
-
 # ComfyUI-Workflow-Tools
 
 A collection of custom nodes for ComfyUI.
@@ -9,7 +8,7 @@ Clone into your ComfyUI custom_nodes folder:
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/Danchi93/ComfyUI-Workflow-Tools
+git clone [https://github.com/Danchi93/ComfyUI-Workflow-Tools](https://github.com/Danchi93/ComfyUI-Workflow-Tools)
 ```
 
 Restart ComfyUI.
@@ -67,6 +66,7 @@ The UI defaults to English. To switch to Chinese, open `prompt_segments.js` and 
 ```js
 const LANG = "zh";  // "en" for English, "zh" for Chinese
 ```
+
 ---
 
 ## Resolution Switcher
@@ -92,6 +92,9 @@ The UI defaults to English. To switch to Chinese, open `resolution_switcher.js` 
 
 ```js
 const LANG = "zh";  // "en" for English, "zh" for Chinese
+```
+
+---
 
 ## 中文介绍
 
@@ -103,7 +106,7 @@ const LANG = "zh";  // "en" for English, "zh" for Chinese
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/Danchi93/ComfyUI-Workflow-Tools
+git clone [https://github.com/Danchi93/ComfyUI-Workflow-Tools](https://github.com/Danchi93/ComfyUI-Workflow-Tools)
 ```
 
 重启 ComfyUI 即可。
@@ -160,9 +163,6 @@ const LANG = "zh";  // "en" 为英文，"zh" 为中文
 
 ---
 
-```markdown
----
-
 ### Resolution Switcher
 
 快速在预设的分辨率之间进行切换，解决原版在切换画幅时需要反复手动输入数值的问题。该节点直接输出对应尺寸的空 Latent（潜空间）。
@@ -186,3 +186,4 @@ const LANG = "zh";  // "en" 为英文，"zh" 为中文
 
 ```js
 const LANG = "zh";  // "en" 为英文，"zh" 为中文
+```
