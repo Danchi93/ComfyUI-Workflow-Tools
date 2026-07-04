@@ -67,7 +67,6 @@ The UI defaults to English. To switch to Chinese, open `prompt_segments.js` and 
 ```js
 const LANG = "zh";  // "en" for English, "zh" for Chinese
 ```
-
 ---
 
 ## Resolution Switcher
@@ -93,9 +92,6 @@ The UI defaults to English. To switch to Chinese, open `resolution_switcher.js` 
 
 ```js
 const LANG = "zh";  // "en" for English, "zh" for Chinese
-
-
----
 
 ## 中文介绍
 
@@ -162,7 +158,7 @@ const LANG = "zh";  // "en" 为英文，"zh" 为中文
 const LANG = "zh";  // "en" 为英文，"zh" 为中文
 ```
 
-
+---
 
 ```markdown
 ---
