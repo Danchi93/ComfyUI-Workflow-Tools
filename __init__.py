@@ -1,41 +1,6 @@
-import os, json
-import comfy.utils, comfy.sd, folder_paths
+from .multi_lora_loader import MultiLoraLoader
 from .prompt_segments import PromptSegments
 from .resolution_switcher import ResolutionSwitcher
-
-class MultiLoraLoader:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model": ("MODEL",),
-                "lora_stack": ("STRING", {"default": "[]", "multiline": False}),
-            }
-        }
-
-    RETURN_TYPES = ("MODEL",)
-    FUNCTION = "apply"
-    CATEGORY = "loaders"
-
-    def apply(self, model, lora_stack="[]"):
-        try:
-            stack = json.loads(lora_stack)
-        except Exception:
-            return (model,)
-
-        for entry in stack:
-            if not entry.get("enabled", False):
-                continue
-            lora_name = entry.get("lora", "None")
-            strength = float(entry.get("strength", 1.0))
-            if lora_name == "None" or strength == 0:
-                continue
-            path = folder_paths.get_full_path("loras", lora_name)
-            if path and os.path.exists(path):
-                lora = comfy.utils.load_torch_file(path)
-                model, _ = comfy.sd.load_lora_for_models(model, None, lora, strength, 0)
-
-        return (model,)
 
 NODE_CLASS_MAPPINGS = {
     "MultiLoraLoader": MultiLoraLoader,

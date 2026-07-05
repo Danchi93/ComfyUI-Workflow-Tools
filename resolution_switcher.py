@@ -1,3 +1,4 @@
+import json
 import torch
 
 class ResolutionSwitcher:
@@ -21,8 +22,6 @@ class ResolutionSwitcher:
     CATEGORY = "latent"
 
     def build(self, presets="[]"):
-        import json
-
         # Default: 1024x1024, batch 1
         width, height, batch = 1024, 1024, 1
 
@@ -49,11 +48,3 @@ class ResolutionSwitcher:
 
         latent = torch.zeros([batch, 4, height // 8, width // 8])
         return ({"samples": latent},)
-
-
-NODE_CLASS_MAPPINGS = {
-    "ResolutionSwitcher": ResolutionSwitcher,
-}
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "ResolutionSwitcher": "Resolution Switcher",
-}

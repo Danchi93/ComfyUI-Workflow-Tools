@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 
 // 语言配置：将下面一行的 "en" 改成 "zh" 即可切换中文
-const LANG = "en";
+const LANG = "zh";
 
 const I18N = {
     en: { label_ph: "Label...", add: "＋ Add Segment", default_label: "Quality Tags",
@@ -34,20 +34,20 @@ app.registerExtension({
                 // When the node is off-screen or zoomed too small, ComfyUI hides
                 // the DOM widget (display:none), which makes scrollHeight return 0.
                 if (!domH || domH <= 0) {
-                    // No reliable layout info. If we already have a measured size,
-                    // keep it (don't collapse). Otherwise fall back to a content
-                    // based estimate so a brand-new hidden node still gets a size.
-                    if (!this._minH) {
-                        const h = this._calcHeight();
-                        this._minH = h;
-                        this.size[1] = h;
-                        app.graph.setDirtyCanvas(true, true);
-                    }
+                    // No reliable layout info. Use the content-based estimate so
+                    // the node still gets a reasonable height — and so deleting
+                    // segments while hidden actually shrinks the node (otherwise
+                    // _minH would be stuck at the old, larger value and the
+                    // deleted segments leave behind empty, non-interactive space).
+                    const h = this._calcHeight();
+                    this._minH = h;
+                    this.setSize([this.size[0], h]);
+                    app.graph.setDirtyCanvas(true, true);
                     return;
                 }
                 const h = domH + 50;
                 this._minH = h;
-                this.size[1] = h;
+                this.setSize([this.size[0], h]);
                 app.graph.setDirtyCanvas(true, true);
             });
         };
@@ -127,7 +127,16 @@ app.registerExtension({
                 del.style.cssText = "background:transparent;color:#666;border:none;border-radius:3px;padding:2px 5px;cursor:pointer;font-size:11px;flex-shrink:0;line-height:1;transition:color 0.15s,background 0.15s;";
                 del.onmouseenter = () => { del.style.color = "#fff"; del.style.background = "#c0392b"; };
                 del.onmouseleave = () => { del.style.color = "#666"; del.style.background = "transparent"; };
-                del.onclick = () => { this._segments.splice(i, 1); this._sync(); this._render(); };
+                del.onclick = () => {
+                    this._segments.splice(i, 1);
+                    this._sync();
+                    // Clear the cached min height so _applySize can actually shrink
+                    // the node. Without this, _minH stays at the old (larger) value
+                    // and the deleted segment's area becomes dead, non-interactive
+                    // space — most visible after copy/paste.
+                    this._minH = 0;
+                    this._render();
+                };
 
                 top.append(toggle, labelNum, label, del);
 
@@ -219,7 +228,10 @@ app.registerExtension({
         const onSerialize = nodeType.prototype.onSerialize;
         nodeType.prototype.onSerialize = function (o) {
             onSerialize?.apply(this, arguments);
-            o.prompt_segments = this._segments;
+            // Deep copy so a pasted/duplicated node doesn't share the same array
+            // reference with the original (which would cause edits in one to
+            // leak into the other).
+            o.prompt_segments = JSON.parse(JSON.stringify(this._segments));
         };
 
         const onRemoved = nodeType.prototype.onRemoved;
@@ -233,6 +245,12 @@ app.registerExtension({
             onConfigure?.apply(this, arguments);
             if (o.prompt_segments) {
                 this._segments = o.prompt_segments;
+                // On paste/duplicate, ComfyUI may carry over a stale cached min
+                // height and a stale DOM widget element height from the original.
+                // Reset both so the new node measures fresh and shrinks correctly
+                // when segments are deleted.
+                this._minH = 0;
+                if (this._domWidget?.element) this._domWidget.element.style.height = "auto";
                 requestAnimationFrame(() => this._render());
             }
         };

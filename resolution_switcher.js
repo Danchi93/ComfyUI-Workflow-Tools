@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 
 // 语言配置：将下面一行的 "en" 改成 "zh" 即可切换中文
-const LANG = "en";
+const LANG = "zh";
 
 const I18N = {
     en: { w: "W", h: "H", batch: "Batch", add: "＋ Add Resolution",
@@ -62,14 +62,14 @@ app.registerExtension({
                     if (!this._minH) {
                         const h = this._calcHeight();
                         this._minH = h;
-                        this.size[1] = h;
+                        this.setSize([this.size[0], h]);
                         app.graph.setDirtyCanvas(true, true);
                     }
                     return;
                 }
                 const h = domH + 50;
                 this._minH = h;
-                this.size[1] = h;
+                this.setSize([this.size[0], h]);
                 app.graph.setDirtyCanvas(true, true);
             });
         };
@@ -113,8 +113,12 @@ app.registerExtension({
                 capsule.style.cssText = `width:30px;height:16px;border-radius:8px;background:${active ? "#43a047" : "#555"};position:relative;transition:background 0.15s;border:1px solid ${active ? "#2e7d32" : "#424242"};`;
                 capsule.innerHTML = `<div style="position:absolute;top:1px;left:${active ? "15px" : "2px"};width:12px;height:12px;border-radius:50%;background:#fff;transition:left 0.15s;"></div>`;
                 toggle.onclick = () => {
-                    // Mutually exclusive: turning one on turns all others off.
-                    this._presets.forEach((q, j) => { q.active = (j === i) ? !q.active : false; });
+                    // Radio behavior: clicking the active one is a no-op (must
+                    // always keep exactly one active — this node switches
+                    // resolutions, it can't disable resolution). Clicking any
+                    // other moves the active flag to it.
+                    if (active) return;
+                    this._presets.forEach((q, j) => { q.active = (j === i); });
                     this._sync();
                     this._render();
                 };
@@ -240,7 +244,9 @@ app.registerExtension({
         const onSerialize = nodeType.prototype.onSerialize;
         nodeType.prototype.onSerialize = function (o) {
             onSerialize?.apply(this, arguments);
-            o.resolution_presets = this._presets;
+            // Deep copy so a pasted/duplicated node doesn't share the same array
+            // reference with the original.
+            o.resolution_presets = JSON.parse(JSON.stringify(this._presets));
         };
 
         const onConfigure = nodeType.prototype.onConfigure;
