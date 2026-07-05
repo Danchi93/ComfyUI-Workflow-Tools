@@ -6,10 +6,10 @@ const LANG = "en";
 const I18N = {
     en: { on_off: "On/Off", lora: "LoRA", strength: "Strength", note: "Note", del: "Del",
           select: "Select LoRA...", add: "＋ Add LoRA", note_ph: "Note...",
-          prompt_strength: "Strength", prompt_note: "Note" },
+          prompt_strength: "Strength", prompt_note: "Note", root_dir: "— Root —" },
     zh: { on_off: "开关", lora: "LoRA", strength: "权重", note: "备注", del: "删除",
           select: "选择 LoRA...", add: "＋ 添加 LoRA", note_ph: "备注...",
-          prompt_strength: "权重", prompt_note: "备注" },
+          prompt_strength: "权重", prompt_note: "备注", root_dir: "— 根目录 —" },
 };
 const T = I18N[LANG] ?? I18N.en;
 
@@ -51,33 +51,148 @@ class DomDropdown {
     }
     show(items, selectedItem, anchorRect, onSelect) {
         this.el.innerHTML = "";
-        items.forEach(item => {
+
+        // Build folder tree from flat list (paths like "画风/style.safetensors" or "角色\\xxx.safetensors")
+        const rootFiles = [];
+        const folderMap = new Map(); // folderName -> [fileBaseNames]
+        const originalMap = new Map(); // normalizedPath -> originalPath
+
+        for (const item of items) {
+            if (item === "None") continue;
+            // Normalize path separators to forward slash for consistent parsing
+            const normalized = item.replace(/\\/g, "/");
+            originalMap.set(normalized, item);
+            const idx = normalized.lastIndexOf("/");
+            if (idx !== -1) {
+                const dir = normalized.substring(0, idx);
+                const file = normalized.substring(idx + 1);
+                if (!folderMap.has(dir)) folderMap.set(dir, []);
+                folderMap.get(dir).push(file);
+            } else {
+                rootFiles.push(normalized);
+            }
+        }
+
+        rootFiles.sort();
+        const sortedDirs = [...folderMap.keys()].sort();
+        for (const dir of sortedDirs) folderMap.get(dir).sort();
+
+        // Normalize selectedItem for consistent comparison
+        const selectedNormalized = (selectedItem && selectedItem !== "None")
+            ? selectedItem.replace(/\\/g, "/") : selectedItem;
+
+        // Auto-expand the folder containing the currently selected item
+        const expandDirs = new Set();
+        if (selectedNormalized) {
+            const si = selectedNormalized.lastIndexOf("/");
+            if (si !== -1) expandDirs.add(selectedNormalized.substring(0, si));
+        }
+
+        // ----- "None" (always first) -----
+        const noneDiv = document.createElement("div");
+        noneDiv.textContent = "— None —";
+        Object.assign(noneDiv.style, {
+            padding: "5px 12px", cursor: "pointer", fontSize: "12px",
+            color: selectedNormalized === "None" ? "#7eb8f7" : "#ccc",
+            background: selectedNormalized === "None" ? "#1a3a5a" : "transparent",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+        });
+        noneDiv.addEventListener("mouseover", () => noneDiv.style.background = "#2a4a2a");
+        noneDiv.addEventListener("mouseout", () => noneDiv.style.background = selectedNormalized === "None" ? "#1a3a5a" : "transparent");
+        noneDiv.addEventListener("mousedown", (e) => { e.stopPropagation(); onSelect("None"); this.hide(); });
+        this.el.appendChild(noneDiv);
+
+        // ----- Helper: render a single LoRA file row -----
+        const makeFileRow = (displayName, fullPathNormalized) => {
+            const originalPath = originalMap.get(fullPathNormalized) || fullPathNormalized;
             const div = document.createElement("div");
-            div.textContent = item === "None" ? "— None —" :
-                item.replace(/\.(safetensors|pt|ckpt)$/i, "").split(/[\\/]/).pop();
+            div.textContent = displayName;
             Object.assign(div.style, {
-                padding: "5px 12px", cursor: "pointer", fontSize: "12px",
-                color: item === selectedItem ? "#7eb8f7" : "#ccc",
-                background: item === selectedItem ? "#1a3a5a" : "transparent",
+                padding: "5px 12px 5px 28px", cursor: "pointer", fontSize: "12px",
+                color: selectedNormalized === fullPathNormalized ? "#7eb8f7" : "#bbb",
+                background: selectedNormalized === fullPathNormalized ? "#1a3a5a" : "transparent",
                 whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
             });
             div.addEventListener("mouseover", () => div.style.background = "#2a4a2a");
-            div.addEventListener("mouseout", () => div.style.background = item === selectedItem ? "#1a3a5a" : "transparent");
-            div.addEventListener("mousedown", (e) => { e.stopPropagation(); onSelect(item); this.hide(); });
-            this.el.appendChild(div);
-        });
+            div.addEventListener("mouseout", () => div.style.background = selectedNormalized === fullPathNormalized ? "#1a3a5a" : "transparent");
+            div.addEventListener("mousedown", (e) => { e.stopPropagation(); onSelect(originalPath); this.hide(); });
+            return div;
+        };
+
+        // ----- Render folders -----
+        for (const dir of sortedDirs) {
+            const files = folderMap.get(dir);
+            const expanded = expandDirs.has(dir);
+
+            const header = document.createElement("div");
+            const arrowSpan = document.createElement("span");
+            arrowSpan.textContent = expanded ? "\u25BE " : "\u25B8 ";
+            arrowSpan.style.cssText = "display:inline-block;width:14px;text-align:center;";
+            header.appendChild(arrowSpan);
+            header.appendChild(document.createTextNode(dir + "/"));
+            Object.assign(header.style, {
+                padding: "5px 12px", cursor: "pointer", fontSize: "12px",
+                color: "#aaa", fontWeight: "bold",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+            });
+            header.addEventListener("mouseover", () => header.style.background = "#2a2a2a");
+            header.addEventListener("mouseout", () => header.style.background = "transparent");
+
+            const children = document.createElement("div");
+            children.style.display = expanded ? "block" : "none";
+
+            for (const file of files) {
+                const displayName = file.replace(/\.(safetensors|pt|ckpt)$/i, "");
+                children.appendChild(makeFileRow(displayName, dir + "/" + file));
+            }
+
+            header.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const isHidden = children.style.display === "none";
+                children.style.display = isHidden ? "block" : "none";
+                arrowSpan.textContent = isHidden ? "\u25BE " : "\u25B8 ";
+            });
+
+            this.el.appendChild(header);
+            this.el.appendChild(children);
+        }
+
+        // ----- Root-level files (no subdirectory) -----
+        if (rootFiles.length > 0 && sortedDirs.length > 0) {
+            // Add a separator between the last folder and root-level files
+            const sep = document.createElement("div");
+            Object.assign(sep.style, {
+                height: "1px", margin: "4px 12px",
+                background: "#444", opacity: "0.6"
+            });
+            this.el.appendChild(sep);
+
+            const rootLabel = document.createElement("div");
+            rootLabel.textContent = T.root_dir;
+            Object.assign(rootLabel.style, {
+                padding: "3px 12px", fontSize: "10px",
+                color: "#666", fontStyle: "italic"
+            });
+            this.el.appendChild(rootLabel);
+        }
+
+        for (const file of rootFiles) {
+            const displayName = file.replace(/\.(safetensors|pt|ckpt)$/i, "").split(/[\\/]/).pop();
+            this.el.appendChild(makeFileRow(displayName, file));
+        }
+
+        // ----- Position & show -----
         this.el.style.display = "block";
         this.el.style.width = anchorRect.width + "px";
         this.el.style.left = anchorRect.left + "px";
         const spaceBelow = window.innerHeight - anchorRect.bottom;
-        const menuH = Math.min(items.length, DROPDOWN_MAX) * DROPDOWN_ITEM_H;
-        if (spaceBelow >= menuH || spaceBelow > window.innerHeight / 2) {
+        const spaceAbove = anchorRect.top;
+        this.el.style.maxHeight = Math.min(Math.max(spaceBelow, spaceAbove) - 20, 480) + "px";
+        if (spaceBelow >= 200 || spaceBelow > spaceAbove) {
             this.el.style.top = anchorRect.bottom + "px"; this.el.style.bottom = "auto";
         } else {
             this.el.style.bottom = (window.innerHeight - anchorRect.top) + "px"; this.el.style.top = "auto";
         }
-        const selIdx = items.indexOf(selectedItem);
-        if (selIdx > 0) this.el.scrollTop = Math.max(0, selIdx - 3) * DROPDOWN_ITEM_H;
         setTimeout(() => {
             document.addEventListener("mousedown", this._onOutside, true);
             document.addEventListener("pointerdown", this._onOutside, true);

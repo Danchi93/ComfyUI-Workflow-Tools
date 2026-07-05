@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 
-// Language: change "en" to "zh" for Chinese
+// 语言配置：将下面一行的 "en" 改成 "zh" 即可切换中文
 const LANG = "en";
 
 const I18N = {
