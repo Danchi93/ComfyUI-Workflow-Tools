@@ -6,13 +6,14 @@ class PromptSegments:
         return {
             "required": {
                 "segments": ("STRING", {"default": "[]", "multiline": False}),
-            },"optional": {
+            },
+            "optional": {
                 "prompts_in": ("STRING", {"forceInput": True}),
             }
         }
 
     RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("prompt",)
+    RETURN_NAMES = ("prompts_out",)
     FUNCTION = "apply"
     CATEGORY = "conditioning"
 

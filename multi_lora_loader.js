@@ -21,7 +21,7 @@ const HEADER_H = 22;
 const STRENGTH_W = 62;
 const TOGGLE_W = 32;   // 给胶囊留足够宽度
 const DEL_W = ROW_H;
-const NOTE_RATIO = 0.22;
+const NOTE_RATIO = 0.28;
 const DROPDOWN_ITEM_H = 24;
 const DROPDOWN_MAX = 12;
 const NODE_MIN_W = 500;
@@ -292,13 +292,47 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             ctx.fillText("▾", lx + lw - 5, ry + rh / 2);
             x += lw + GAP;
 
-            // 权重
-            drawBox(ctx, x, ry + 4, cols[2], rh - 8, 4, "#252525", "#3a3a3a");
+            // 权重（带左右箭头微调 & 拖拽调整）
+            const sx = x, sw = cols[2];
+            drawBox(ctx, sx, ry + 4, sw, rh - 8, 4, "#252525", "#3a3a3a");
+
+            // 左右箭头（各占约10px）
+            const arrowW = 10;
+            const aY = ry + 4, aH = rh - 8;
+            // 左箭头点击区
+            this._arrowLL = sx; this._arrowLR = sx + arrowW;
+            this._arrowLT = aY; this._arrowLB = aY + aH;
+            ctx.fillStyle = "#666";
+            ctx.font = "bold 10px sans-serif";
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText("◀", sx + arrowW / 2 + 1, aY + aH / 2 + 0.5);
+            // 右箭头点击区
+            this._arrowRL = sx + sw - arrowW; this._arrowRR = sx + sw;
+            this._arrowRT = aY; this._arrowRB = aY + aH;
+            ctx.fillText("▶", sx + sw - arrowW / 2 - 1, aY + aH / 2 + 0.5);
+
+            // 中间数值
             ctx.fillStyle = row.strength === 1.0 ? "#aaa" : "#7ec8e3";
             ctx.font = "12px 'Courier New', monospace";
             ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.fillText(row.strength.toFixed(2), x + cols[2] / 2, ry + rh / 2);
-            x += cols[2] + GAP;
+            ctx.fillText(row.strength.toFixed(2), sx + sw / 2, ry + rh / 2);
+
+            // 拖拽区（中间数值区域）
+            this._dragL = sx + arrowW; this._dragR = sx + sw - arrowW;
+            this._dragT = aY; this._dragB = aY + aH;
+
+            // 拖拽时的视觉反馈提示线
+            if (this._dragHint !== undefined) {
+                ctx.strokeStyle = "#7ec8e3";
+                ctx.lineWidth = 1;
+                ctx.setLineDash([2, 2]);
+                ctx.beginPath();
+                ctx.moveTo(this._dragHint, aY);
+                ctx.lineTo(this._dragHint, aY + aH);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            x += sw + GAP;
 
             // 备注
             drawBox(ctx, x, ry + 4, cols[3], rh - 8, 4, "#1e1e28", "#35354a");
@@ -318,11 +352,41 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             ctx.fillText("✕", bx + bs / 2, by + bs / 2);
         },
         mouse(e, pos, node) {
-            if (e.type !== "pointerdown") return false;
             const [mx, my] = pos;
             const ww = this._lastW || node.size[0];
             const y = this._lastY || 0;
+
+            // 拖拽调整权重（左右拖动，向右增大，向左减小）
+            if (this._dragging && e.type === "pointermove") {
+                const dx = mx - this._dragStartX;
+                const delta = dx * 0.001; // 移动1px ≈ 0.001
+                let v = Math.round((this._dragStartVal + delta) * 100) / 100;
+                if (v < -100) v = -100; if (v > 100) v = 100;
+                if (v !== row.strength) {
+                    row.strength = v;
+                    this._dragChanged = true;  // 权重确实变过，说明是拖拽行为
+                    onchange();
+                }
+                return true;
+            }
+            if (this._dragging && (e.type === "pointerup" || e.type === "pointerleave")) {
+                this._dragging = false;
+                const changed = this._dragChanged;
+                this._dragChanged = false;
+                // 只有权重从未变过才算"点击"，弹出输入框；拖拽过（即使拖回原位）不弹
+                if (e.type === "pointerup" && !changed) {
+                    app.canvas.prompt(T.prompt_strength, row.strength.toFixed(2), (val) => {
+                        const n = parseFloat(val);
+                        if (!isNaN(n)) { row.strength = Math.round(n * 100) / 100; onchange(); }
+                    }, e);
+                }
+                app.canvas?.setDirty(true, true);
+                return true;
+            }
+
+            if (e.type !== "pointerdown") return false;
             if (my < y || my > y + ROW_H + 6) return false;
+
             const cols = colWidths(ww);
             let x = PAD + INNER_PAD;
             if (mx >= x && mx < x + cols[0]) { row.enabled = !row.enabled; onchange(); return true; }
@@ -340,11 +404,35 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             }
             x += cols[1] + GAP;
             if (mx >= x && mx < x + cols[2]) {
-                app.canvas.prompt(T.prompt_strength, row.strength.toFixed(2), (val) => {
-                    const n = parseFloat(val);
-                    if (!isNaN(n)) { row.strength = Math.round(n * 100) / 100; onchange(); }
-                }, e);
-                return true;
+                // 左箭头点击
+                if (this._arrowLL !== undefined &&
+                    mx >= this._arrowLL && mx <= this._arrowLR &&
+                    my >= this._arrowLT && my <= this._arrowLB) {
+                    const v = row.strength - 0.01;
+                    row.strength = Math.round(Math.max(-100, v) * 100) / 100;
+                    onchange();
+                    return true;
+                }
+                // 右箭头点击
+                if (this._arrowRL !== undefined &&
+                    mx >= this._arrowRL && mx <= this._arrowRR &&
+                    my >= this._arrowRT && my <= this._arrowRB) {
+                    const v = row.strength + 0.01;
+                    row.strength = Math.round(Math.min(100, v) * 100) / 100;
+                    onchange();
+                    return true;
+                }
+                // 中间数值区：点击可直接输入，按住拖拽可快速调整（左右水平拖拽）
+                if (this._dragL !== undefined &&
+                    mx >= this._dragL && mx <= this._dragR &&
+                    my >= this._dragT && my <= this._dragB) {
+                    this._dragging = true;
+                    this._dragChanged = false;
+                    this._dragStartVal = row.strength;
+                    this._dragStartX = mx;
+                    return true;
+                }
+                return false;
             }
             x += cols[2] + GAP;
             if (mx >= x && mx < x + cols[3]) {

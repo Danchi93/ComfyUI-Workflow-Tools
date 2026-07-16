@@ -20,6 +20,11 @@ app.registerExtension({
             const LINE_H = 18, PADDING = 20, TOP_ROW = 30, SEG_GAP = 5, NODE_CHROME = 54;
             let h = NODE_CHROME;
             this._segments.forEach(seg => {
+                if (!seg.enabled) {
+                    // Collapsed: header + minimal textarea (64px)
+                    h += TOP_ROW + 64 + SEG_GAP;
+                    return;
+                }
                 const lines = Math.max(1, (seg.text.match(/\n/g) || []).length + 1);
                 h += TOP_ROW + Math.max(64, lines * LINE_H + PADDING) + SEG_GAP;
             });
@@ -31,33 +36,20 @@ app.registerExtension({
             this._domWidget.computeSize = () => [0, -4];
             requestAnimationFrame(() => {
                 const domH = this._segContainer.scrollHeight;
-                // When the node is off-screen or zoomed too small, ComfyUI hides
-                // the DOM widget (display:none), which makes scrollHeight return 0.
-                if (!domH || domH <= 0) {
-                    // No reliable layout info. Use the content-based estimate so
-                    // the node still gets a reasonable height — and so deleting
-                    // segments while hidden actually shrinks the node (otherwise
-                    // _minH would be stuck at the old, larger value and the
-                    // deleted segments leave behind empty, non-interactive space).
-                    const h = this._calcHeight();
-                    this._minH = h;
-                    this.setSize([this.size[0], h]);
-                    app.graph.setDirtyCanvas(true, true);
-                    return;
-                }
-                const h = domH + 50;
+                const h = (domH && domH > 0) ? domH + 50 : this._calcHeight();
                 this._minH = h;
                 this.setSize([this.size[0], h]);
                 app.graph.setDirtyCanvas(true, true);
             });
         };
 
-        // Re-measure every textarea + node size. Used when the node becomes visible
-        // again after having been hidden during a render (e.g. page load or undo
-        // while off-screen), since the initial measurement ran while hidden.
         nodeType.prototype._remeasure = function () {
             if (!this._segContainer) return;
+            let idx = 0;
             this._segContainer.querySelectorAll("textarea").forEach(ta => {
+                const seg = this._segments[idx++];
+                // Skip collapsed segments — their height is fixed at 64px.
+                if (seg && !seg.enabled) return;
                 ta.style.height = "auto";
                 const sh = ta.scrollHeight;
                 if (sh && sh > 0) ta.style.height = sh + "px";
@@ -83,11 +75,11 @@ app.registerExtension({
                 toggle.type = "checkbox"; toggle.checked = seg.enabled;
                 toggle.style.cssText = "width:14px;height:14px;cursor:pointer;accent-color:#4a9eff;flex-shrink:0;";
                 toggle.onchange = () => {
-                    seg.enabled = toggle.checked;
-                    updateRowStyle();top.style.background = seg.enabled ? "#2d2d3d" : "#252525";
-                    top.style.borderLeftColor = seg.enabled ? "#4a9eff" : "#555";
-                    row.style.borderColor = seg.enabled ? "#3a3a4a" : "#2a2a2a";
+                    seg.enabled = !seg.enabled;
+                    toggle.checked = seg.enabled;
                     this._sync();
+                    this._minH = 0;
+                    this._render();
                 };
 
                 const labelNum = document.createElement("input");
@@ -102,15 +94,11 @@ app.registerExtension({
                     const parsed = parseFloat(raw);
                     const total = this._segments.length;
                     const current = i + 1;
-                    // Clamping (no rejection), mirroring native ComfyUI inputs
-                    // (sampler steps, lora strength): invalid -> keep original.
                     if (!Number.isFinite(parsed)) { labelNum.value = current; return; }
                     let target = Math.round(parsed);
                     if (target <= 0) target = 1;
                     if (target > total) target = total;
                     if (target === current) { labelNum.value = current; return; }
-                    // Move-insert: lift the whole segment object (text/label/enabled
-                    // travel with it) and insert at the new position.
                     const item = this._segments.splice(i, 1)[0];
                     this._segments.splice(target - 1, 0, item);
                     this._sync();
@@ -130,10 +118,6 @@ app.registerExtension({
                 del.onclick = () => {
                     this._segments.splice(i, 1);
                     this._sync();
-                    // Clear the cached min height so _applySize can actually shrink
-                    // the node. Without this, _minH stays at the old (larger) value
-                    // and the deleted segment's area becomes dead, non-interactive
-                    // space — most visible after copy/paste.
                     this._minH = 0;
                     this._render();
                 };
@@ -142,20 +126,25 @@ app.registerExtension({
 
                 const ta = document.createElement("textarea");
                 ta.value = seg.text; ta.placeholder = T.seg_ph(i + 1);
-                ta.style.cssText = "width:100%;min-height:64px;height:64px;background:#181820;color:#ddd;border:none;border-top:1px solid #2a2a3a;padding:6px 8px;font-size:12px;resize:none;box-sizing:border-box;outline:none;font-family:monospace;line-height:1.5;overflow:hidden;";
-                ta.onfocus = () => { ta.style.background = "#1c1c28"; };
-                ta.onblur = () => { ta.style.background = "#181820"; };
 
-                const autoResize = () => {
-                    ta.style.height = "auto";
-                    // scrollHeight is 0 while the widget DOM is hidden
-                    // (off-screen / zoomed out); skip so we don't collapse it.
-                    const sh = ta.scrollHeight;
-                    if (sh && sh > 0) ta.style.height = sh + "px";
-                    this._applySize();
-                };
-                ta.oninput = () => { seg.text = ta.value; autoResize(); this._sync(); };
-                requestAnimationFrame(autoResize);
+                // Collapsed: lock height to min-height, hide overflow to show ~1 line.
+                const taBase = "width:100%;background:#181820;color:#ddd;border:none;border-top:1px solid #2a2a3a;padding:6px 8px;font-size:12px;resize:none;box-sizing:border-box;outline:none;font-family:monospace;line-height:1.5;";
+                if (!seg.enabled) {
+                    ta.style.cssText = taBase + "height:64px;min-height:64px;overflow:hidden;opacity:0.4;";
+                } else {
+                    ta.style.cssText = taBase + "min-height:64px;height:64px;overflow:hidden;";
+                    ta.onfocus = () => { ta.style.background = "#1c1c28"; };
+                    ta.onblur = () => { ta.style.background = "#181820"; };
+
+                    const autoResize = () => {
+                        ta.style.height = "auto";
+                        const sh = ta.scrollHeight;
+                        if (sh && sh > 0) ta.style.height = sh + "px";
+                        this._applySize();
+                    };
+                    ta.oninput = () => { seg.text = ta.value; autoResize(); this._sync(); };
+                    requestAnimationFrame(autoResize);
+                }
 
                 row.append(top, ta);
                 container.appendChild(row);
@@ -195,30 +184,17 @@ app.registerExtension({
                 if (this._minH && size[1] < this._minH) size[1] = this._minH;
             };
 
-            // Watch for the node re-entering the viewport. If a render happened
-            // while the widget DOM was hidden (off-screen / heavily zoomed out,
-            // e.g. on page load or right after an undo), scrollHeight was 0 and
-            // the textareas never expanded. Re-measure on each hidden->visible
-            // transition. The observer stays alive for the node's lifetime so it
-            // also catches later undos that re-render while the node is off-screen.
             this._wasVisible = false;
             if ("IntersectionObserver" in window) {
                 this._visObserver = new IntersectionObserver((entries) => {
                     for (const e of entries) {
-                        // Only act on a hidden -> visible transition, so we don't
-                        // re-measure on every visible frame (which would be wasteful
-                        // and could fight the user while typing / dragging).
-                        if (e.isIntersecting && !this._wasVisible) {
-                            this._remeasure();
-                        }
+                        if (e.isIntersecting && !this._wasVisible) this._remeasure();
                         this._wasVisible = e.isIntersecting;
                     }
                 }, { threshold: 0 });
-                // observe on next frame so the DOM widget element is attached
                 requestAnimationFrame(() => {
-                    if (this._visObserver && this._domWidget?.element) {
+                    if (this._visObserver && this._domWidget?.element)
                         this._visObserver.observe(this._domWidget.element);
-                    }
                 });
             }
 
@@ -228,9 +204,6 @@ app.registerExtension({
         const onSerialize = nodeType.prototype.onSerialize;
         nodeType.prototype.onSerialize = function (o) {
             onSerialize?.apply(this, arguments);
-            // Deep copy so a pasted/duplicated node doesn't share the same array
-            // reference with the original (which would cause edits in one to
-            // leak into the other).
             o.prompt_segments = JSON.parse(JSON.stringify(this._segments));
         };
 
@@ -245,10 +218,6 @@ app.registerExtension({
             onConfigure?.apply(this, arguments);
             if (o.prompt_segments) {
                 this._segments = o.prompt_segments;
-                // On paste/duplicate, ComfyUI may carry over a stale cached min
-                // height and a stale DOM widget element height from the original.
-                // Reset both so the new node measures fresh and shrinks correctly
-                // when segments are deleted.
                 this._minH = 0;
                 if (this._domWidget?.element) this._domWidget.element.style.height = "auto";
                 requestAnimationFrame(() => this._render());

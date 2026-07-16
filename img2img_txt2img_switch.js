@@ -96,5 +96,16 @@ app.registerExtension({
                 }
             });
         };
+
+        // 工作流加载后同步状态：onConfigure 在序列化数据加载完毕后被调用，
+        // 此时 mode widget 的值已被恢复为保存时的真实值，需要同步 _switchMode
+        const onConfigure = nodeType.prototype.onConfigure;
+        nodeType.prototype.onConfigure = function (info) {
+            onConfigure?.apply(this, arguments);
+            const modeWidget = this.widgets?.find(w => w.name === "mode");
+            if (modeWidget) {
+                this._switchMode = modeWidget.value;
+            }
+        };
     }
 });
