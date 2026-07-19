@@ -17,7 +17,7 @@ class PromptSegments:
     RETURN_NAMES = ("prompts_out", "conditioning")
     FUNCTION = "apply"
     CATEGORY = "conditioning"
-    SEARCH_ALIASES = ["prompt segments", "multi prompt", "tag suggestion", "workflow tools"]
+    SEARCH_ALIASES = ["prompt segments", "multi prompt", "tag suggestion", "workflow tools", "提示词", "多段提示词", "标签联想", "工作流工具"]
 
     def apply(self, segments="[]", prompts_in=None, clip=None):
         try:

@@ -20,7 +20,7 @@ class ResolutionSwitcher:
     RETURN_NAMES = ("LATENT",)
     FUNCTION = "build"
     CATEGORY = "latent"
-    SEARCH_ALIASES = ["resolution", "preset", "latent size", "workflow tools"]
+    SEARCH_ALIASES = ["resolution", "preset", "latent size", "workflow tools", "分辨率", "预设", "分辨率切换", "工作流工具"]
 
     def build(self, presets="[]"):
         # Default: 1024x1024, batch 1

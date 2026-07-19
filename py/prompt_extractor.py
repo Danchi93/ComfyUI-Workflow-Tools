@@ -25,7 +25,7 @@ class PromptExtractor:
     RETURN_NAMES = ("positive", "negative")
     FUNCTION = "extract"
     CATEGORY = "image"
-    SEARCH_ALIASES = ["prompt extractor", "metadata", "read prompt", "workflow tools"]
+    SEARCH_ALIASES = ["prompt extractor", "metadata", "read prompt", "workflow tools", "提示词提取", "元数据", "读取提示词", "工作流工具"]
 
     def extract(self, image):
         path = self._find_file(image)

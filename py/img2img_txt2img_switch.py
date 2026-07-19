@@ -25,7 +25,7 @@ class Img2ImgTxt2ImgSwitch:
     RETURN_NAMES = ("latent",)
     FUNCTION = "switch"
     CATEGORY = "latent"
-    SEARCH_ALIASES = ["img2img", "txt2img", "switch", "workflow tools"]
+    SEARCH_ALIASES = ["img2img", "txt2img", "switch", "workflow tools", "图生图", "文生图", "切换", "工作流工具"]
 
     def switch(self, mode=True, img2img_latent=None, txt2img_latent=None):
         if mode and txt2img_latent is not None:
