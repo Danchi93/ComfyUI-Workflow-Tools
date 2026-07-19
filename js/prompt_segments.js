@@ -1,7 +1,7 @@
 import { app } from "../../../scripts/app.js";
 
 // 语言配置：将下面一行的 "en" 改成 "zh" 即可切换中文
-const LANG = "zh";
+const LANG = "en";
 
 const I18N = {
     en: { label_ph: "Label...", add: "＋ Add Segment", default_label: "Quality Tags",
