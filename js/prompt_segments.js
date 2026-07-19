@@ -1,4 +1,4 @@
-import { app } from "../../scripts/app.js";
+import { app } from "../../../scripts/app.js";
 
 // 语言配置：将下面一行的 "en" 改成 "zh" 即可切换中文
 const LANG = "en";
@@ -11,13 +11,54 @@ const I18N = {
 };
 const T = I18N[LANG] ?? I18N.en;
 
+var _TAG_DICT = [];
+var _TAG_READY = false;
+(function () {
+    try {
+        var url = new URL("./tags/tag_dictionary.json", import.meta.url).href;
+        fetch(url).then(function (r) { return r.json(); }).then(function (data) {
+            _TAG_DICT = data;
+            _TAG_READY = true;
+        }).catch(function (e) { console.warn("[PromptSegments] Tag dict load failed:", e); });
+    } catch (e) { console.warn("[PromptSegments] Tag dict init failed:", e); }
+})();
+
+function _matchTags(prefix) {
+    if (!_TAG_READY || prefix.length < 2) return [];
+    var lower = prefix.toLowerCase();
+    var result = [];
+    for (var i = 0; i < _TAG_DICT.length; i++) {
+        if (_TAG_DICT[i].toLowerCase().startsWith(lower)) {
+            result.push(_TAG_DICT[i]);
+            if (result.length >= 10) break;
+        }
+    }
+    return result;
+}
+
+function _getWordAtCursor(ta) {
+    var val = ta.value;
+    var pos = ta.selectionStart;
+    var before = val.substring(0, pos);
+    var lastDelim = Math.max(
+        before.lastIndexOf(','),
+        before.lastIndexOf('.'),
+        before.lastIndexOf(';'),
+        before.lastIndexOf('\n'),
+        before.lastIndexOf('，'),
+        before.lastIndexOf('。')
+    );
+    var word = before.substring(lastDelim + 1).trim();
+    return { lastDelim: lastDelim, word: word, before: before, after: val.substring(pos) };
+}
+
 app.registerExtension({
     name: "PromptSegments",
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== "PromptSegments") return;
 
         nodeType.prototype._calcHeight = function () {
-            const LINE_H = 18, PADDING = 20, TOP_ROW = 30, SEG_GAP = 5, NODE_CHROME = 54;
+            const LINE_H = 18, PADDING = 20, TOP_ROW = 30, SEG_GAP = 5, NODE_CHROME = 60;
             let h = NODE_CHROME;
             this._segments.forEach(seg => {
                 if (!seg.enabled) {
@@ -36,7 +77,7 @@ app.registerExtension({
             this._domWidget.computeSize = () => [0, -4];
             requestAnimationFrame(() => {
                 const domH = this._segContainer.scrollHeight;
-                const h = (domH && domH > 0) ? domH + 50 : this._calcHeight();
+                const h = (domH && domH > 0) ? domH + 60 : this._calcHeight();
                 this._minH = h;
                 this.setSize([this.size[0], h]);
                 app.graph.setDirtyCanvas(true, true);
@@ -124,6 +165,9 @@ app.registerExtension({
 
                 top.append(toggle, labelNum, label, del);
 
+                const suggestStrip = document.createElement("div");
+                suggestStrip.style.cssText = "display:none;flex-wrap:wrap;gap:3px;padding:3px 6px;background:#161622;border-top:1px solid #2a2a3a;";
+
                 const ta = document.createElement("textarea");
                 ta.value = seg.text; ta.placeholder = T.seg_ph(i + 1);
 
@@ -133,8 +177,16 @@ app.registerExtension({
                     ta.style.cssText = taBase + "height:64px;min-height:64px;overflow:hidden;opacity:0.4;";
                 } else {
                     ta.style.cssText = taBase + "min-height:64px;height:64px;overflow:hidden;";
-                    ta.onfocus = () => { ta.style.background = "#1c1c28"; };
-                    ta.onblur = () => { ta.style.background = "#181820"; };
+                    ta.onfocus = () => { ta.style.background = "#1c1c28"; suggestStrip.style.display = "none"; this._applySize(); };
+                    ta.onblur = () => {
+                        ta.style.background = "#181820";
+                        setTimeout(() => {
+                            if (suggestStrip.style.display !== "none") {
+                                suggestStrip.style.display = "none";
+                                this._applySize();
+                            }
+                        }, 200);
+                    };
 
                     const autoResize = () => {
                         ta.style.height = "auto";
@@ -142,11 +194,101 @@ app.registerExtension({
                         if (sh && sh > 0) ta.style.height = sh + "px";
                         this._applySize();
                     };
-                    ta.oninput = () => { seg.text = ta.value; autoResize(); this._sync(); };
+
+                    ta.onkeydown = (e) => {
+                        if (suggestStrip.style.display === "none") return;
+                        var chips = suggestStrip.querySelectorAll("span");
+                        var updateHighlight = function() {
+                            chips.forEach(function(c, i) {
+                                c.style.background = i === ta._suggestIdx ? "#3a5a7a" : "#252535";
+                                c.style.borderColor = i === ta._suggestIdx ? "#5a7a9a" : "#3a3a5a";
+                                c.style.color = i === ta._suggestIdx ? "#fff" : "#aaa";
+                            });
+                        };
+                        if (e.key === "Tab") {
+                            e.preventDefault();
+                            var idx = ta._suggestIdx >= 0 ? ta._suggestIdx : 0;
+                            if (chips[idx]) chips[idx].click();
+                            return;
+                        }
+                        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                            e.preventDefault();
+                            if (ta._suggestIdx < 0) {
+                                ta._suggestIdx = e.key === "ArrowDown" ? 0 : chips.length - 1;
+                                updateHighlight();
+                                return;
+                            }
+                            // Build rows based on chip Y positions
+                            var rows = [];
+                            var lastTop = -1;
+                            for (var i = 0; i < chips.length; i++) {
+                                var top = chips[i].getBoundingClientRect().top;
+                                if (Math.abs(top - lastTop) > 2) { rows.push([]); lastTop = top; }
+                                rows[rows.length - 1].push(i);
+                            }
+                            var rowIdx = -1, colIdx = -1;
+                            for (var r = 0; r < rows.length; r++) {
+                                var c = rows[r].indexOf(ta._suggestIdx);
+                                if (c >= 0) { rowIdx = r; colIdx = c; break; }
+                            }
+                            if (e.key === "ArrowDown" && rowIdx < rows.length - 1) {
+                                var nextRow = rows[rowIdx + 1];
+                                ta._suggestIdx = nextRow[Math.min(colIdx, nextRow.length - 1)];
+                            } else if (e.key === "ArrowUp" && rowIdx > 0) {
+                                var prevRow = rows[rowIdx - 1];
+                                ta._suggestIdx = prevRow[Math.min(colIdx, prevRow.length - 1)];
+                            }
+                            updateHighlight();
+                            return;
+                        }
+                        if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && ta._suggestIdx >= 0) {
+                            e.preventDefault();
+                            ta._suggestIdx = e.key === "ArrowLeft"
+                                ? Math.max(ta._suggestIdx - 1, 0)
+                                : Math.min(ta._suggestIdx + 1, chips.length - 1);
+                            updateHighlight();
+                            return;
+                        }
+                    };
+
+                    ta.oninput = () => {
+                        seg.text = ta.value; autoResize(); this._sync();
+                        ta._suggestIdx = -1;
+                        var info = _getWordAtCursor(ta);
+                        var matches = _matchTags(info.word);
+                        if (matches.length === 0) { suggestStrip.style.display = "none"; return; }
+                        suggestStrip.innerHTML = "";
+                        var node = this;
+                        for (var m = 0; m < matches.length; m++) {
+                            (function(tag) {
+                                var displayTag = tag.replace(/_/g, ' ');
+                                var chip = document.createElement("span");
+                                chip.textContent = displayTag;
+                                chip.style.cssText = "display:inline-block;padding:2px 6px;background:#252535;color:#aaa;border:1px solid #3a3a5a;border-radius:3px;cursor:pointer;font-size:10px;font-family:monospace;white-space:nowrap;transition:background 0.1s,color 0.1s,border-color 0.1s;";
+                                chip.onmouseenter = function() { chip.style.background = "#3a4a6a"; chip.style.color = "#fff"; chip.style.borderColor = "#5a7a9a"; };
+                                chip.onmouseleave = function() { chip.style.background = "#252535"; chip.style.color = "#aaa"; chip.style.borderColor = "#3a3a5a"; };
+                                chip.onclick = function() {
+                                    var prefix = info.before.substring(0, info.lastDelim + 1);
+                                    var spacer = info.lastDelim >= 0 ? " " : "";
+                                    var insert = prefix + spacer + displayTag + ", ";
+                                    ta.value = insert + info.after;
+                                    seg.text = ta.value;
+                                    ta.focus();
+                                    ta.setSelectionRange(insert.length, insert.length);
+                                    suggestStrip.style.display = "none";
+                                    autoResize();
+                                    node._sync();
+                                };
+                                suggestStrip.appendChild(chip);
+                            })(matches[m]);
+                        }
+                        suggestStrip.style.display = "flex";
+                    };
+
                     requestAnimationFrame(autoResize);
                 }
 
-                row.append(top, ta);
+                row.append(top, ta, suggestStrip);
                 container.appendChild(row);
             });
 
@@ -169,13 +311,15 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
 
+            this.size[0] = Math.max(this.size[0], 400);
+
             const raw = this.widgets?.find(w => w.name === "segments");
             if (raw) { raw.hidden = true; raw.computeSize = () => [0, -4]; }
             this._rawWidget = raw;
             this._segments = [{ enabled: true, label: T.default_label, text: "" }];
 
             const container = document.createElement("div");
-            container.style.cssText = "display:flex;flex-direction:column;gap:4px;padding:4px;box-sizing:border-box;width:100%;";
+            container.style.cssText = "display:flex;flex-direction:column;gap:4px;padding:4px;box-sizing:border-box;width:100%;position:relative;";
             this._segContainer = container;
 
             this._domWidget = this.addDOMWidget("_ui", "div", container, { serialize: false });

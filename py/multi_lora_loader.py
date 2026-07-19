@@ -14,6 +14,7 @@ class MultiLoraLoader:
     RETURN_TYPES = ("MODEL",)
     FUNCTION = "apply"
     CATEGORY = "loaders"
+    SEARCH_ALIASES = ["multi lora", "lora stack", "workflow tools"]
 
     def apply(self, model, lora_stack="[]"):
         try:
