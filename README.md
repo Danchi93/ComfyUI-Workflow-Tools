@@ -44,28 +44,23 @@ const LANG = "zh";  // "en" for English, "zh" for Chinese
 
 ## Prompt Segments
 
-Combine multiple prompt segments into one node and output them in order — no manual concatenation needed.
+Combine multiple prompt segments into one node with auto-complete, ordered output, and direct CLIP conditioning.
 
 ![preview2](images/preview2.png)
 
 ### Features
 
 - Add/remove prompt segments dynamically
-- Enable/disable each segment individually
-- Add a label to each segment for organization
+- Enable/disable each segment individually with a toggle
+- Label each segment for quick organization
+- **Tag auto-complete** — type 2+ characters to see suggestions from a 10,000+ Danbooru tag dictionary; click a tag to insert it, or use arrow keys + Tab to navigate with keyboard
+- **Insert position control** — choose where the incoming `prompts_in` text is placed (before segment 1, between segments, etc.)
+- **Direct CLIP output** — optional CLIP input/output lets you connect straight to the KSampler without a separate CLIP Text Encoder node
 - Outputs all enabled segments merged in order
 
 ### Usage
 
-Add the **Prompt Segments** node in your workflow. Connect the prompt output to a CLIP Text Encoder or any node that accepts text input.
-
-### Language
-
-The UI defaults to English. To switch to Chinese, open `prompt_segments.js` and change line 4:
-
-```js
-const LANG = "zh";  // "en" for English, "zh" for Chinese
-```
+Add the **Prompt Segments** node. Connect `prompts_out` to a CLIP Text Encoder (or any text input), or optionally connect a CLIP model to use the `conditioning` output directly on a KSampler.
 
 ---
 
@@ -140,18 +135,21 @@ const LANG = "zh";  // "en" 为英文，"zh" 为中文
 
 ### Prompt Segments
 
-将多段提示词合并到一个节点中，按顺序输出，无需手动拼接。
+将多段提示词合并到一个节点中，按顺序输出，支持标签自动补全、直接 CLIP 调节输出，无需手动拼接或额外编码节点。
 
 #### 功能特性
 
 - 动态增删提示词段落
 - 每段可单独开关
 - 支持为每段添加标签便于管理
+- **标签自动补全** — 输入 2 个以上字符自动弹出匹配提示，点击标签即插入；支持键盘 ↑↓←→ 导航 + Tab 补全
+- **插入位置控制** — 可指定 `prompts_in` 的接入位置（第 1 段前、第 2 段前等）
+- **直接 CLIP 输出** — 可选 CLIP 输入输出，绕过独立文本编码器，直连 KSampler
 - 按顺序合并所有启用的段落后输出
 
 #### 使用方法
 
-在工作流中添加 **Prompt Segments** 节点，将 prompt 输出连接到 CLIP 文本编码器或任何接受文本输入的节点。
+添加 **Prompt Segments** 节点，将 `prompts_out` 连接到 CLIP 文本编码器（或任意文本输入），或连接 CLIP 模型后直接用 `conditioning` 输出接入 KSampler。
 
 #### 语言切换
 
