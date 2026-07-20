@@ -6,6 +6,7 @@ class PromptSegments:
         return {
             "required": {
                 "segments": ("STRING", {"default": "[]", "multiline": False}),
+                "insert_pos": ("INT", {"default": 1, "min": 1, "step": 1}),
             },
             "optional": {
                 "prompts_in": ("STRING", {"forceInput": True}),
@@ -19,7 +20,7 @@ class PromptSegments:
     CATEGORY = "conditioning"
     SEARCH_ALIASES = ["prompt segments", "multi prompt", "tag suggestion", "workflow tools", "提示词", "多段提示词", "标签联想", "工作流工具"]
 
-    def apply(self, segments="[]", prompts_in=None, clip=None):
+    def apply(self, segments="[]", insert_pos=1, prompts_in=None, clip=None):
         try:
             stack = json.loads(segments)
         except Exception:
@@ -32,7 +33,15 @@ class PromptSegments:
         ]
         result = ", ".join(parts)
         if prompts_in and prompts_in.strip():
-            result = prompts_in.strip() + (", " + result if result else "")
+            idx = max(0, insert_pos - 1)
+            if idx <= 0:
+                result = prompts_in.strip() + (", " + result if result else "")
+            elif idx >= len(parts):
+                result = result + (", " if result else "") + prompts_in.strip()
+            else:
+                before = parts[:idx]
+                after = parts[idx:]
+                result = ", ".join(before + [prompts_in.strip()] + after)
 
         conditioning = None
         if clip is not None and result.strip():

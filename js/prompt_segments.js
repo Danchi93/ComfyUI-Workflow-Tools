@@ -58,8 +58,8 @@ app.registerExtension({
         if (nodeData.name !== "PromptSegments") return;
 
         nodeType.prototype._calcHeight = function () {
-            const LINE_H = 18, PADDING = 20, TOP_ROW = 30, SEG_GAP = 5, NODE_CHROME = 60;
-            let h = NODE_CHROME;
+            const LINE_H = 18, PADDING = 20, TOP_ROW = 30, SEG_GAP = 5, NODE_CHROME = 60, INSERT_ROW = 24;
+            let h = NODE_CHROME + INSERT_ROW;
             this._segments.forEach(seg => {
                 if (!seg.enabled) {
                     // Collapsed: header + minimal textarea (64px)
@@ -101,6 +101,32 @@ app.registerExtension({
         nodeType.prototype._render = function () {
             const container = this._segContainer;
             container.innerHTML = "";
+
+            const insertRow = document.createElement("div");
+            insertRow.style.cssText = "display:inline-flex;align-items:center;gap:6px;padding:3px 6px;background:#1a1a22;border:1px solid #2a2a3a;border-radius:4px;font-size:11px;color:#888;align-self:flex-start;";
+            var insertLabel = document.createElement("span");
+            insertLabel.textContent = LANG === "zh" ? "→ 插入到第几段前:" : "→ Insert before #:";
+            insertLabel.style.cssText = "flex-shrink:0;";
+            var insertNum = document.createElement("input");
+            insertNum.type = "number";
+            insertNum.value = this._insertPosWidget ? this._insertPosWidget.value : 1;
+            insertNum.min = 1;
+            insertNum.step = 1;
+            insertNum.style.cssText = "width:44px;height:20px;background:#252535;color:#ccc;border:1px solid #3a3a5a;border-radius:3px;padding:0 2px;font-size:11px;text-align:center;outline:none;font-family:monospace;line-height:18px;";
+            insertNum.onfocus = function() { insertNum.style.borderColor = "#4a9eff"; insertNum.style.color = "#fff"; };
+            insertNum.onblur = function() { insertNum.style.borderColor = "#3a3a5a"; insertNum.style.color = "#ccc"; };
+            insertNum.onchange = function() {
+                var v = parseInt(insertNum.value) || 1;
+                if (v < 1) v = 1;
+                insertNum.value = v;
+                if (this._insertPosWidget) { this._insertPosWidget.value = v; this._insertPosWidget.callback(v); }
+                this._sync();
+            }.bind(this);
+            var insertHint = document.createElement("span");
+            insertHint.textContent = LANG === "zh" ? "1=最前" : "1=front";
+            insertHint.style.cssText = "color:#555;font-size:10px;flex-shrink:0;";
+            insertRow.append(insertLabel, insertNum, insertHint);
+            container.appendChild(insertRow);
 
             this._segments.forEach((seg, i) => {
                 const row = document.createElement("div");
@@ -316,6 +342,11 @@ app.registerExtension({
             const raw = this.widgets?.find(w => w.name === "segments");
             if (raw) { raw.hidden = true; raw.computeSize = () => [0, -4]; }
             this._rawWidget = raw;
+
+            var ipw = this.widgets?.find(function(w) { return w.name === "insert_pos"; });
+            if (ipw) { ipw.hidden = true; ipw.computeSize = () => [0, -4]; }
+            this._insertPosWidget = ipw;
+
             this._segments = [{ enabled: true, label: T.default_label, text: "" }];
 
             const container = document.createElement("div");
