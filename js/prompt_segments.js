@@ -105,16 +105,14 @@ app.registerExtension({
             const insertRow = document.createElement("div");
             insertRow.style.cssText = "display:inline-flex;align-items:center;gap:6px;padding:3px 6px;background:#1a1a22;border:1px solid #2a2a3a;border-radius:4px;font-size:11px;color:#888;align-self:flex-start;";
             var insertLabel = document.createElement("span");
-            insertLabel.textContent = LANG === "zh" ? "→ 插入到第几段前:" : "→ Insert before #:";
+            insertLabel.textContent = LANG === "zh" ? "→ 外部文本插入到第几段前:" : "→ Insert external text before #:";
             insertLabel.style.cssText = "flex-shrink:0;";
             var insertNum = document.createElement("input");
-            insertNum.type = "number";
+            insertNum.type = "text";
             insertNum.value = this._insertPosWidget ? this._insertPosWidget.value : 1;
-            insertNum.min = 1;
-            insertNum.step = 1;
-            insertNum.style.cssText = "width:44px;height:20px;background:#252535;color:#ccc;border:1px solid #3a3a5a;border-radius:3px;padding:0 2px;font-size:11px;text-align:center;outline:none;font-family:monospace;line-height:18px;";
-            insertNum.onfocus = function() { insertNum.style.borderColor = "#4a9eff"; insertNum.style.color = "#fff"; };
-            insertNum.onblur = function() { insertNum.style.borderColor = "#3a3a5a"; insertNum.style.color = "#ccc"; };
+            insertNum.style.cssText = "width:30px;height:18px;background:#1a1a22;color:#aaa;border:1px solid #333344;border-radius:4px;text-align:center;font-size:11px;font-family:monospace;padding:1px 0;outline:none;box-sizing:content-box;";
+            insertNum.onfocus = function() { insertNum.style.borderColor = "#4a9eff"; insertNum.style.color = "#fff"; insertNum.select(); };
+            insertNum.onblur = function() { insertNum.style.borderColor = "#333344"; insertNum.style.color = "#aaa"; };
             insertNum.onchange = function() {
                 var v = parseInt(insertNum.value) || 1;
                 if (v < 1) v = 1;
