@@ -53,11 +53,9 @@ app.registerExtension({
 
         nodeType.prototype._applySize = function () {
             this._domWidget.element.style.height = "auto";
-            this._domWidget.computeSize = () => [0, -4];
+            this._domWidget.computeSize = () => [0, this._domContentH || -4];
             requestAnimationFrame(() => {
                 const domH = this._presetContainer.scrollHeight;
-                // Bail out (keep last size) when hidden off-screen, same guard
-                // as the other nodes.
                 if (!domH || domH <= 0) {
                     if (!this._minH) {
                         const h = this._calcHeight();
@@ -67,6 +65,7 @@ app.registerExtension({
                     }
                     return;
                 }
+                this._domContentH = domH;
                 const h = domH + 50;
                 this._minH = h;
                 this.setSize([this.size[0], h]);
@@ -195,6 +194,8 @@ app.registerExtension({
         const onNodeCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
+
+            this._domContentH = 0;
 
             const raw = this.widgets?.find(w => w.name === "presets");
             if (raw) { raw.hidden = true; raw.computeSize = () => [0, -4]; }

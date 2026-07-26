@@ -5,11 +5,15 @@ const LANG = "en";
 
 const I18N = {
     en: { on_off: "On/Off", lora: "LoRA", strength: "Strength", note: "Note", del: "Del",
+          trigger: "Trigger", trigger_ph: "(none)",
           select: "Select LoRA...", add: "＋ Add LoRA", note_ph: "Note...",
-          prompt_strength: "Strength", prompt_note: "Note", root_dir: "— Root —" },
+          prompt_strength: "Strength", prompt_note: "Note", prompt_trigger: "Trigger",
+          root_dir: "— Root —" },
     zh: { on_off: "开关", lora: "LoRA", strength: "权重", note: "备注", del: "删除",
+          trigger: "触发词", trigger_ph: "(无)",
           select: "选择 LoRA...", add: "＋ 添加 LoRA", note_ph: "备注...",
-          prompt_strength: "权重", prompt_note: "备注", root_dir: "— 根目录 —" },
+          prompt_strength: "权重", prompt_note: "备注", prompt_trigger: "触发词",
+          root_dir: "— 根目录 —" },
 };
 const T = I18N[LANG] ?? I18N.en;
 
@@ -31,10 +35,10 @@ const GAP = 5;
 const TOG_W = 28, TOG_H = 16;
 
 function colWidths(totalW) {
-    // 内容区比底板再多缩进 INNER_PAD*2，让开关/删除按钮不贴底板边缘
-    const avail = totalW - (PAD + INNER_PAD) * 2 - TOGGLE_W - STRENGTH_W - DEL_W - 4 * GAP;
-    const noteW = Math.floor(avail * NOTE_RATIO);
-    return [TOGGLE_W, avail - noteW, STRENGTH_W, noteW, DEL_W];
+    const avail = totalW - (PAD + INNER_PAD) * 2 - TOGGLE_W - STRENGTH_W - DEL_W - 5 * GAP;
+    const noteW = Math.floor(avail * 0.20);
+    const triggerW = Math.floor(avail * 0.20);
+    return [TOGGLE_W, avail - noteW - triggerW, STRENGTH_W, triggerW, noteW, DEL_W];
 }
 
 class DomDropdown {
@@ -216,7 +220,7 @@ function parseRows(val) {
     return null;
 }
 function defaultRows() {
-    return [{ enabled: true, lora: "None", strength: 1.0, note: "" }];
+    return [{ enabled: true, lora: "None", strength: 1.0, trigger: "", note: "" }];
 }
 
 function drawBox(ctx, x, y, w, h, r, fill, stroke) {
@@ -236,8 +240,7 @@ function makeHeaderWidget() {
             ctx.fillStyle = "#606060";
             ctx.font = "10px sans-serif";
             ctx.textBaseline = "middle";
-            // 修复1：最后一列改回"删除"
-            [T.on_off, T.lora, T.strength, T.note, T.del].forEach((label, i) => {
+            [T.on_off, T.lora, T.strength, T.trigger, T.note, T.del].forEach((label, i) => {
                 ctx.textAlign = "center";
                 ctx.fillText(label, x + cols[i] / 2, y + HEADER_H / 2);
                 x += cols[i] + GAP;
@@ -334,17 +337,26 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             }
             x += sw + GAP;
 
-            // 备注
+            // 触发词
             drawBox(ctx, x, ry + 4, cols[3], rh - 8, 4, "#1e1e28", "#35354a");
             ctx.save(); ctx.rect(x + 4, ry, cols[3] - 8, rh + 6); ctx.clip();
+            ctx.fillStyle = row.trigger ? "#e8c87e" : "#444";
+            ctx.font = "10px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+            ctx.fillText(row.trigger || T.trigger_ph, x + 6, ry + rh / 2);
+            ctx.restore();
+            x += cols[3] + GAP;
+
+            // 备注
+            drawBox(ctx, x, ry + 4, cols[4], rh - 8, 4, "#1e1e28", "#35354a");
+            ctx.save(); ctx.rect(x + 4, ry, cols[4] - 8, rh + 6); ctx.clip();
             ctx.fillStyle = row.note ? "#aaa" : "#444";
             ctx.font = "11px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
             ctx.fillText(row.note || T.note_ph, x + 6, ry + rh / 2);
             ctx.restore();
-            x += cols[3] + GAP;
+            x += cols[4] + GAP;
 
             // 删除
-            const bs = rh - 8, bx = x + (cols[4] - bs) / 2, by = ry + 4;
+            const bs = rh - 8, bx = x + (cols[5] - bs) / 2, by = ry + 4;
             drawBox(ctx, bx, by, bs, bs, 5, "#6a0000", "#c0392b");
             ctx.fillStyle = "#ff6b6b";
             ctx.font = `bold ${Math.floor(bs * 0.58)}px sans-serif`;
@@ -399,7 +411,18 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
                 const sy = rect.top + (node.pos[1] + y + ROW_H) * scale + off[1] * scale;
                 domDropdown.show(loraList, row.lora,
                     { left: sx, top: sy, bottom: sy, width: cols[1] * scale },
-                    (sel) => { row.lora = sel; onchange(); });
+                    (sel) => {
+                        row.lora = sel;
+                        if (sel !== "None") {
+                            try {
+                                var t = localStorage.getItem("lora_trigger_" + sel);
+                                row.trigger = t !== null ? t : "";
+                            } catch(e) {}
+                        } else {
+                            row.trigger = "";
+                        }
+                        onchange();
+                    });
                 return true;
             }
             x += cols[1] + GAP;
@@ -436,11 +459,22 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             }
             x += cols[2] + GAP;
             if (mx >= x && mx < x + cols[3]) {
-                app.canvas.prompt(T.prompt_note, row.note, (val) => { row.note = val; onchange(); }, e);
+                app.canvas.prompt(T.prompt_trigger, row.trigger || "", (val) => {
+                    row.trigger = val;
+                    if (row.lora !== "None") {
+                        try { localStorage.setItem("lora_trigger_" + row.lora, val); } catch(e) {}
+                    }
+                    onchange();
+                }, e);
                 return true;
             }
             x += cols[3] + GAP;
-            if (mx >= x && mx < x + cols[4]) { onDelete(); return true; }
+            if (mx >= x && mx < x + cols[4]) {
+                app.canvas.prompt(T.prompt_note, row.note, (val) => { row.note = val; onchange(); }, e);
+                return true;
+            }
+            x += cols[4] + GAP;
+            if (mx >= x && mx < x + cols[5]) { onDelete(); return true; }
             return false;
         }
     };
@@ -511,7 +545,7 @@ app.registerExtension({
 
             // 用自定义widget替代原生button
             node.addCustomWidget(makeAddButtonWidget(() => {
-                rows.push({ enabled: true, lora: "None", strength: 1.0, note: "" });
+                rows.push({ enabled: true, lora: "None", strength: 1.0, trigger: "", note: "" });
                 node._rebuild(rows);
             }));
 

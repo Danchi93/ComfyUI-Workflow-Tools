@@ -74,9 +74,10 @@ app.registerExtension({
 
         nodeType.prototype._applySize = function () {
             this._domWidget.element.style.height = "auto";
-            this._domWidget.computeSize = () => [0, -4];
+            this._domWidget.computeSize = () => [0, this._domContentH || -4];
             requestAnimationFrame(() => {
                 const domH = this._segContainer.scrollHeight;
+                this._domContentH = domH;
                 const h = (domH && domH > 0) ? domH + 60 : this._calcHeight();
                 this._minH = h;
                 this.setSize([this.size[0], h]);
@@ -336,6 +337,7 @@ app.registerExtension({
             onNodeCreated?.apply(this, arguments);
 
             this.size[0] = Math.max(this.size[0], 400);
+            this._domContentH = 0;
 
             const raw = this.widgets?.find(w => w.name === "segments");
             if (raw) { raw.hidden = true; raw.computeSize = () => [0, -4]; }

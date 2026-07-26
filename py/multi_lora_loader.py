@@ -11,7 +11,8 @@ class MultiLoraLoader:
             }
         }
 
-    RETURN_TYPES = ("MODEL",)
+    RETURN_TYPES = ("MODEL", "STRING")
+    RETURN_NAMES = ("model", "triggers")
     FUNCTION = "apply"
     CATEGORY = "loaders"
     SEARCH_ALIASES = ["multi lora", "lora stack", "workflow tools", "多LoRA", "LoRA堆叠", "工作流工具"]
@@ -20,8 +21,9 @@ class MultiLoraLoader:
         try:
             stack = json.loads(lora_stack)
         except Exception:
-            return (model,)
+            return (model, "")
 
+        triggers = []
         for entry in stack:
             if not entry.get("enabled", False):
                 continue
@@ -33,5 +35,10 @@ class MultiLoraLoader:
             if path and os.path.exists(path):
                 lora = comfy.utils.load_torch_file(path)
                 model, _ = comfy.sd.load_lora_for_models(model, None, lora, strength, 0)
+            trigger = entry.get("trigger", "").strip()
+            if trigger:
+                triggers.append(trigger)
 
-        return (model,)
+        trigger_out = ", " + ", ".join(triggers) + ", " if triggers else ""
+
+        return (model, trigger_out)
