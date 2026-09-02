@@ -33,11 +33,33 @@ Manage multiple LoRAs in a single node.
 - Adjust weight per LoRA (click or drag)
 - Custom trigger words per LoRA with local auto-memory
 - **Triggers output** — concatenates all enabled LoRA trigger words into a single STRING output
+- **Optional CLIP input/output** — connect a CLIP model to also apply text-encoder weights of LoRAs; entirely optional (skip it for model-only LoRAs)
+- **URL button per LoRA** — save a download page link (Civitai, LiblibAI, etc.) and jump to it with one click
+- **Thumbnail previews** — place an image next to your LoRA file (`lora.png` or `lora.preview.png`) to see a thumbnail in the dropdown; hover to view it larger
 - Add notes and remove LoRAs dynamically
 
 ### Usage
 
 Add the **Multi LoRA Loader** node, connect the model input, then use the model output as usual. Connect the `triggers` output to any text input node (e.g. Prompt Segments) to automatically inject trigger words.
+
+**URL button**
+
+- Grey `＋` — not configured. Click to paste the download page link (saved automatically and remembered per LoRA).
+- Green `↗` — configured. Click to open the link. Hold **Shift + click** to edit the URL.
+- Trigger words and URLs are remembered in your browser (localStorage), so you only set them up once — they auto-fill whenever you select that LoRA again.
+
+**Thumbnails**
+
+Put an image with the same name as your LoRA in the same folder:
+
+```
+models/loras/
+  style.safetensors
+  style.png            ← shows a small thumbnail next to the name
+  style.preview.png    ← also supported
+```
+
+Hover a row to see a large preview next to the dropdown.
 
 ---
 

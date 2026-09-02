@@ -5,14 +5,16 @@ const LANG = "en";
 
 const I18N = {
     en: { on_off: "On/Off", lora: "LoRA", strength: "Strength", note: "Note", del: "Del",
-          trigger: "Trigger", trigger_ph: "(none)",
+          trigger: "Trigger", trigger_ph: "(none)", url: "URL",
           select: "Select LoRA...", add: "＋ Add LoRA", note_ph: "Note...",
           prompt_strength: "Strength", prompt_note: "Note", prompt_trigger: "Trigger",
+          prompt_url: "URL (paste download page link)",
           root_dir: "— Root —" },
     zh: { on_off: "开关", lora: "LoRA", strength: "权重", note: "备注", del: "删除",
-          trigger: "触发词", trigger_ph: "(无)",
+          trigger: "触发词", trigger_ph: "(无)", url: "网址",
           select: "选择 LoRA...", add: "＋ 添加 LoRA", note_ph: "备注...",
           prompt_strength: "权重", prompt_note: "备注", prompt_trigger: "触发词",
+          prompt_url: "网址（粘贴下载页链接）",
           root_dir: "— 根目录 —" },
 };
 const T = I18N[LANG] ?? I18N.en;
@@ -25,21 +27,92 @@ const HEADER_H = 22;
 const STRENGTH_W = 62;
 const TOGGLE_W = 32;   // 给胶囊留足够宽度
 const DEL_W = ROW_H;
+const URL_W = 22;      // 网址按钮（小）
 const NOTE_RATIO = 0.28;
 const DROPDOWN_ITEM_H = 24;
 const DROPDOWN_MAX = 12;
-const NODE_MIN_W = 500;
+const NODE_MIN_W = 600;
 const GAP = 5;
 
 // 胶囊尺寸：严格小于TOGGLE_W
 const TOG_W = 28, TOG_H = 16;
 
 function colWidths(totalW) {
-    const avail = totalW - (PAD + INNER_PAD) * 2 - TOGGLE_W - STRENGTH_W - DEL_W - 5 * GAP;
+    const avail = totalW - (PAD + INNER_PAD) * 2 - TOGGLE_W - STRENGTH_W - DEL_W - URL_W - 6 * GAP;
     const noteW = Math.floor(avail * 0.20);
     const triggerW = Math.floor(avail * 0.20);
-    return [TOGGLE_W, avail - noteW - triggerW, STRENGTH_W, triggerW, noteW, DEL_W];
+    return [TOGGLE_W, avail - noteW - triggerW, STRENGTH_W, triggerW, noteW, URL_W, DEL_W];
 }
+
+// ---------- LoRA preview (ComfyUI /experiment/models/preview) ----------
+let pathIndexMap = null; // normalizedPath -> pathIndex (null = 接口不可用，功能降级)
+const noPreviewSet = new Set(); // 已确认无图路径，避免反复 404 请求
+
+async function loadPathIndexMap() {
+    try {
+        const resp = await fetch("/experiment/models/loras");
+        if (!resp.ok) return;
+        const list = await resp.json();
+        const map = new Map();
+        if (Array.isArray(list)) {
+            for (const it of list) {
+                if (it && typeof it.name === "string") {
+                    map.set(it.name.replace(/\\/g, "/"), it.pathIndex ?? 0);
+                }
+            }
+        }
+        pathIndexMap = map.size > 0 ? map : null;
+    } catch (e) { pathIndexMap = null; }
+}
+
+// 构建预览图 URL；接口不可用或路径未知时返回 null（调用方静默跳过）
+function previewUrlFor(loraPath) {
+    if (!pathIndexMap) return null;
+    const norm = (loraPath || "").replace(/\\/g, "/");
+    const idx = pathIndexMap.get(norm);
+    if (idx === undefined) return null;
+    return `/experiment/models/preview/loras/${idx}/` +
+        norm.split("/").map(encodeURIComponent).join("/");
+}
+
+// hover 浮层：固定显示在下拉框右侧，不遮挡下拉列表
+class HoverPreview {
+    constructor() {
+        this.el = document.createElement("div");
+        Object.assign(this.el.style, {
+            position: "fixed", zIndex: "100000", display: "none",
+            pointerEvents: "none", background: "#151515",
+            border: "1px solid #4a8a4a", borderRadius: "8px",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.8)", padding: "4px"
+        });
+        this.img = document.createElement("img");
+        Object.assign(this.img.style, {
+            display: "block", maxWidth: "260px", maxHeight: "340px",
+            objectFit: "contain", borderRadius: "4px"
+        });
+        this.el.appendChild(this.img);
+        document.body.appendChild(this.el);
+    }
+    show(url, anchorRect) {
+        this.img.src = url;
+        this.el.style.display = "block";
+        const pad = 10;
+        let left = anchorRect.right + pad;
+        if (left + 280 > window.innerWidth) {
+            left = Math.max(4, anchorRect.left - 280 - pad); // 右缘不足 → 放左侧
+        }
+        let top = anchorRect.top;
+        const h = this.img.getBoundingClientRect().height || 300;
+        if (top + h > window.innerHeight) top = Math.max(4, window.innerHeight - h - 4);
+        this.el.style.left = left + "px";
+        this.el.style.top = top + "px";
+    }
+    hide() {
+        this.el.style.display = "none";
+        this.img.removeAttribute("src"); // 避免空src触发页面URL请求
+    }
+}
+const hoverPreview = new HoverPreview();
 
 class DomDropdown {
     constructor() {
@@ -110,16 +183,43 @@ class DomDropdown {
         const makeFileRow = (displayName, fullPathNormalized) => {
             const originalPath = originalMap.get(fullPathNormalized) || fullPathNormalized;
             const div = document.createElement("div");
-            div.textContent = displayName;
             Object.assign(div.style, {
                 padding: "5px 12px 5px 28px", cursor: "pointer", fontSize: "12px",
                 color: selectedNormalized === fullPathNormalized ? "#7eb8f7" : "#bbb",
-                background: selectedNormalized === fullPathNormalized ? "#1a3a5a" : "transparent",
-                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis"
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                display: "flex", alignItems: "center", gap: "6px"
             });
             div.addEventListener("mouseover", () => div.style.background = "#2a4a2a");
             div.addEventListener("mouseout", () => div.style.background = selectedNormalized === fullPathNormalized ? "#1a3a5a" : "transparent");
             div.addEventListener("mousedown", (e) => { e.stopPropagation(); onSelect(originalPath); this.hide(); });
+
+            // LoRA preview: 有同名/同名.preview 图片时，名字后面显示小缩略图 + hover 浮层大图
+            // 缩略图放名字后面，无图行不占位，保持名字与常规对齐
+            const pUrl = previewUrlFor(originalPath);
+            const nameSpan = document.createElement("span");
+            nameSpan.textContent = displayName;
+            Object.assign(nameSpan.style, {
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                minWidth: "0", flex: "1 1 auto"
+            });
+            div.appendChild(nameSpan);
+
+            if (pUrl && !noPreviewSet.has(originalPath)) {
+                const thumb = document.createElement("img");
+                thumb.src = pUrl;
+                Object.assign(thumb.style, {
+                    width: "14px", height: "14px", objectFit: "cover",
+                    borderRadius: "3px", flexShrink: "0", display: "none"
+                });
+                thumb.addEventListener("load", () => { thumb.style.display = "block"; });
+                thumb.addEventListener("error", () => { thumb.remove(); noPreviewSet.add(originalPath); }); // 无图：移除并记忆
+                div.appendChild(thumb);
+
+                div.addEventListener("mouseenter", () => {
+                    hoverPreview.show(pUrl, this.el.getBoundingClientRect());
+                });
+                div.addEventListener("mouseleave", () => hoverPreview.hide());
+            }
             return div;
         };
 
@@ -205,6 +305,7 @@ class DomDropdown {
     hide() {
         if (this.el.style.display === "none") return;
         this.el.style.display = "none";
+        hoverPreview.hide();
         document.removeEventListener("mousedown", this._onOutside, true);
         document.removeEventListener("pointerdown", this._onOutside, true);
         app.canvas?.setDirty(true);
@@ -220,7 +321,7 @@ function parseRows(val) {
     return null;
 }
 function defaultRows() {
-    return [{ enabled: true, lora: "None", strength: 1.0, trigger: "", note: "" }];
+    return [{ enabled: true, lora: "None", strength: 1.0, trigger: "", note: "", url: "" }];
 }
 
 function drawBox(ctx, x, y, w, h, r, fill, stroke) {
@@ -240,7 +341,7 @@ function makeHeaderWidget() {
             ctx.fillStyle = "#606060";
             ctx.font = "10px sans-serif";
             ctx.textBaseline = "middle";
-            [T.on_off, T.lora, T.strength, T.trigger, T.note, T.del].forEach((label, i) => {
+            [T.on_off, T.lora, T.strength, T.trigger, T.note, T.url, T.del].forEach((label, i) => {
                 ctx.textAlign = "center";
                 ctx.fillText(label, x + cols[i] / 2, y + HEADER_H / 2);
                 x += cols[i] + GAP;
@@ -251,6 +352,13 @@ function makeHeaderWidget() {
 }
 
 function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
+    const setUrl = (val) => {
+        row.url = (val || "").trim();
+        if (row.lora !== "None") {
+            try { localStorage.setItem("lora_url_" + row.lora, row.url); } catch (e) {}
+        }
+        onchange();
+    };
     return {
         name: `__lora_row_${rowIndex}`, type: "custom_lora_row",
         value: null, serialize: false,
@@ -355,6 +463,18 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             ctx.restore();
             x += cols[4] + GAP;
 
+            // 网址按钮：未配置=灰色＋，已配置=绿色↗
+            const us = rh - 8, ux = x + (cols[5] - us) / 2, uy = ry + 4;
+            const hasUrl = !!(row.url && /^https?:\/\//i.test(row.url.trim()));
+            drawBox(ctx, ux, uy, us, us, 5,
+                hasUrl ? "#0f3a1a" : "#2a2a2a",
+                hasUrl ? "#2e9e4f" : "#4a4a4a");
+            ctx.fillStyle = hasUrl ? "#5ccf7a" : "#8a8a8a";
+            ctx.font = `bold ${Math.floor(us * 0.55)}px sans-serif`;
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText(hasUrl ? "↗" : "＋", ux + us / 2, uy + us / 2 + 0.5);
+            x += cols[5] + GAP;
+
             // 删除
             const bs = rh - 8, bx = x + (cols[5] - bs) / 2, by = ry + 4;
             drawBox(ctx, bx, by, bs, bs, 5, "#6a0000", "#c0392b");
@@ -417,9 +537,12 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
                             try {
                                 var t = localStorage.getItem("lora_trigger_" + sel);
                                 row.trigger = t !== null ? t : "";
+                                var u = localStorage.getItem("lora_url_" + sel);
+                                row.url = u !== null ? u : "";
                             } catch(e) {}
                         } else {
                             row.trigger = "";
+                            row.url = "";
                         }
                         onchange();
                     });
@@ -474,7 +597,23 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
                 return true;
             }
             x += cols[4] + GAP;
-            if (mx >= x && mx < x + cols[5]) { onDelete(); return true; }
+            if (mx >= x && mx < x + cols[5]) {
+                const url = row.url || "";
+                if (/^https?:\/\//i.test(url.trim())) {
+                    // 有网址：点击跳转（Ctrl/Shift+点击 编辑）
+                    if (e.ctrlKey || e.shiftKey) {
+                        app.canvas.prompt(T.prompt_url, url, (val) => { setUrl(val); }, e);
+                    } else {
+                        window.open(url.trim(), "_blank");
+                    }
+                } else {
+                    // 无网址：弹出输入框
+                    app.canvas.prompt(T.prompt_url, url, (val) => { setUrl(val); }, e);
+                }
+                return true;
+            }
+            x += cols[5] + GAP;
+            if (mx >= x && mx < x + cols[6]) { onDelete(); return true; }
             return false;
         }
     };
@@ -527,6 +666,9 @@ app.registerExtension({
             if (Array.isArray(vals)) loraList = ["None", ...vals];
         } catch (e) {}
 
+        // 预加载 LoRA 目录映射，用于预览图（接口不可用时静默降级）
+        loadPathIndexMap();
+
         node._rebuild = (rows) => {
             node._loraRows = rows;
             node.widgets = (node.widgets || []).filter(w =>
@@ -545,7 +687,7 @@ app.registerExtension({
 
             // 用自定义widget替代原生button
             node.addCustomWidget(makeAddButtonWidget(() => {
-                rows.push({ enabled: true, lora: "None", strength: 1.0, trigger: "", note: "" });
+                rows.push({ enabled: true, lora: "None", strength: 1.0, trigger: "", note: "", url: "" });
                 node._rebuild(rows);
             }));
 

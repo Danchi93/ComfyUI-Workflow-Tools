@@ -33,11 +33,33 @@ git clone https://github.com/Danchi93/ComfyUI-Workflow-Tools
 - 可拖动/点击调整权重
 - 每个 LoRA 可自定义触发词，带本地记忆功能
 - **触发词输出** — 将已启用 LoRA 的触发词拼接为 STRING 输出，可直接接入提示词
+- **可选 CLIP 输入输出** — 接入 CLIP 后可同时作用于含 text encoder 权重的 LoRA；完全是可选的，不接只作用于模型本身
+- **每个 LoRA 配一个网址按钮** — 保存下载页链接（C站、LiblibAI 等），一键跳转查看更新/教程
+- **缩略图预览** — LoRA 同目录放一张同名图片（`lora.png` 或 `lora.preview.png`），下拉菜单即显示小缩略图，悬停放大查看
 - 支持备注和动态增删
 
 ### 使用方法
 
 添加 **Multi LoRA Loader** 节点，连接模型输入，模型输出用法与标准 LoRA Loader 相同。将 `triggers` 输出接入提示词节点（如 Prompt Segments）即可自动注入触发词。
+
+**网址按钮**
+
+- 灰色 `＋` — 未配置。点击粘贴下载页链接（自动保存，按 LoRA 记住）。
+- 绿色 `↗` — 已配置。点击打开链接。按住 **Shift + 点击** 可编辑网址。
+- 触发词和网址都保存在浏览器 localStorage 里，只需配置一次，再次选择该 LoRA 时自动带出。
+
+**缩略图**
+
+在 LoRA 同目录放一张同名图片：
+
+```
+models/loras/
+  style.safetensors
+  style.png            ← 名字旁显示小缩略图
+  style.preview.png    ← 也支持
+```
+
+鼠标悬停行时，下拉框旁会显示大图预览。
 
 ---
 

@@ -8,20 +8,23 @@ class MultiLoraLoader:
             "required": {
                 "model": ("MODEL",),
                 "lora_stack": ("STRING", {"default": "[]", "multiline": False}),
+            },
+            "optional": {
+                "clip": ("CLIP",),   # 可选：接入后支持含 text encoder 权重的 LoRA
             }
         }
 
-    RETURN_TYPES = ("MODEL", "STRING")
-    RETURN_NAMES = ("model", "triggers")
+    RETURN_TYPES = ("MODEL", "CLIP", "STRING")
+    RETURN_NAMES = ("model", "clip", "triggers")
     FUNCTION = "apply"
     CATEGORY = "loaders"
     SEARCH_ALIASES = ["multi lora", "lora stack", "workflow tools", "多LoRA", "LoRA堆叠", "工作流工具"]
 
-    def apply(self, model, lora_stack="[]"):
+    def apply(self, model, lora_stack="[]", clip=None):
         try:
             stack = json.loads(lora_stack)
         except Exception:
-            return (model, "")
+            return (model, clip, "")
 
         triggers = []
         for entry in stack:
@@ -34,11 +37,12 @@ class MultiLoraLoader:
             path = folder_paths.get_full_path("loras", lora_name)
             if path and os.path.exists(path):
                 lora = comfy.utils.load_torch_file(path)
-                model, _ = comfy.sd.load_lora_for_models(model, None, lora, strength, 0)
+                # clip 为 None 时 load_lora_for_models 会自动跳过 CLIP 部分
+                model, clip = comfy.sd.load_lora_for_models(model, clip, lora, strength, strength)
             trigger = entry.get("trigger", "").strip()
             if trigger:
                 triggers.append(trigger)
 
         trigger_out = ", " + ", ".join(triggers) + ", " if triggers else ""
 
-        return (model, trigger_out)
+        return (model, clip, trigger_out)
