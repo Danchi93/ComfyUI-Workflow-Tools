@@ -36,11 +36,16 @@ git clone https://github.com/Danchi93/ComfyUI-Workflow-Tools
 - **可选 CLIP 输入输出** — 接入 CLIP 后可同时作用于含 text encoder 权重的 LoRA；完全是可选的，不接只作用于模型本身
 - **每个 LoRA 配一个网址按钮** — 保存下载页链接（C站、LiblibAI 等），一键跳转查看更新/教程
 - **缩略图预览** — LoRA 同目录放一张同名图片（`lora.png` 或 `lora.preview.png`），下拉菜单即显示小缩略图，悬停放大查看
+- **行排序** — 点击行首的序号，输入目标位置即可移动该行，把常用的 LoRA 排到前面
 - 支持备注和动态增删
 
 ### 使用方法
 
 添加 **Multi LoRA Loader** 节点，连接模型输入，模型输出用法与标准 LoRA Loader 相同。将 `triggers` 输出接入提示词节点（如 Prompt Segments）即可自动注入触发词。
+
+**行排序**
+
+点击每行开头的序号框，输入目标位置（例如输入 `1` 移到最前）。该行会移动到对应位置，其余行自动顺延。`triggers` 输出的顺序也会跟着变。
 
 **网址按钮**
 

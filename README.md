@@ -36,11 +36,16 @@ Manage multiple LoRAs in a single node.
 - **Optional CLIP input/output** — connect a CLIP model to also apply text-encoder weights of LoRAs; entirely optional (skip it for model-only LoRAs)
 - **URL button per LoRA** — save a download page link (Civitai, LiblibAI, etc.) and jump to it with one click
 - **Thumbnail previews** — place an image next to your LoRA file (`lora.png` or `lora.preview.png`) to see a thumbnail in the dropdown; hover to view it larger
+- **Row sorting** — click the number at the start of a row and type a target position to move it; keep your frequently used LoRAs on top
 - Add notes and remove LoRAs dynamically
 
 ### Usage
 
 Add the **Multi LoRA Loader** node, connect the model input, then use the model output as usual. Connect the `triggers` output to any text input node (e.g. Prompt Segments) to automatically inject trigger words.
+
+**Row order**
+
+Click the number box at the start of a row and type a target position (e.g. `1` to move it to the top). The row is moved there and the rows in between shift automatically. The `triggers` output follows the same order.
 
 **URL button**
 

@@ -5,16 +5,16 @@ const LANG = "en";
 
 const I18N = {
     en: { on_off: "On/Off", lora: "LoRA", strength: "Strength", note: "Note", del: "Del",
-          trigger: "Trigger", trigger_ph: "(none)", url: "URL",
+          trigger: "Trigger", trigger_ph: "(none)", url: "URL", order: "#",
           select: "Select LoRA...", add: "＋ Add LoRA", note_ph: "Note...",
           prompt_strength: "Strength", prompt_note: "Note", prompt_trigger: "Trigger",
-          prompt_url: "URL (paste download page link)",
+          prompt_url: "URL (paste download page link)", prompt_order: "Move to position",
           root_dir: "— Root —" },
     zh: { on_off: "开关", lora: "LoRA", strength: "权重", note: "备注", del: "删除",
-          trigger: "触发词", trigger_ph: "(无)", url: "网址",
+          trigger: "触发词", trigger_ph: "(无)", url: "网址", order: "序",
           select: "选择 LoRA...", add: "＋ 添加 LoRA", note_ph: "备注...",
           prompt_strength: "权重", prompt_note: "备注", prompt_trigger: "触发词",
-          prompt_url: "网址（粘贴下载页链接）",
+          prompt_url: "网址（粘贴下载页链接）", prompt_order: "移动到第几位",
           root_dir: "— 根目录 —" },
 };
 const T = I18N[LANG] ?? I18N.en;
@@ -26,22 +26,23 @@ const INNER_PAD = 4;     // 底板内：内容（开关/输入框/删除）距�
 const HEADER_H = 22;
 const STRENGTH_W = 62;
 const TOGGLE_W = 32;   // 给胶囊留足够宽度
-const DEL_W = ROW_H;
+const DEL_W = 22;      // 删除按钮列（= 按钮尺寸，与网址列等宽）
 const URL_W = 22;      // 网址按钮（小）
+const ORDER_W = 22;    // 序号列（点击输入目标位置排序）
 const NOTE_RATIO = 0.28;
 const DROPDOWN_ITEM_H = 24;
 const DROPDOWN_MAX = 12;
-const NODE_MIN_W = 600;
+const NODE_MIN_W = 500;   // 最小/默认宽度（拖拽下限，旧节点也会被矫正）
 const GAP = 5;
 
 // 胶囊尺寸：严格小于TOGGLE_W
 const TOG_W = 28, TOG_H = 16;
 
 function colWidths(totalW) {
-    const avail = totalW - (PAD + INNER_PAD) * 2 - TOGGLE_W - STRENGTH_W - DEL_W - URL_W - 6 * GAP;
+    const avail = totalW - (PAD + INNER_PAD) * 2 - ORDER_W - TOGGLE_W - STRENGTH_W - DEL_W - URL_W - 7 * GAP;
     const noteW = Math.floor(avail * 0.20);
     const triggerW = Math.floor(avail * 0.20);
-    return [TOGGLE_W, avail - noteW - triggerW, STRENGTH_W, triggerW, noteW, URL_W, DEL_W];
+    return [ORDER_W, TOGGLE_W, avail - noteW - triggerW, STRENGTH_W, triggerW, noteW, URL_W, DEL_W];
 }
 
 // ---------- LoRA preview (ComfyUI /experiment/models/preview) ----------
@@ -341,7 +342,7 @@ function makeHeaderWidget() {
             ctx.fillStyle = "#606060";
             ctx.font = "10px sans-serif";
             ctx.textBaseline = "middle";
-            [T.on_off, T.lora, T.strength, T.trigger, T.note, T.url, T.del].forEach((label, i) => {
+            [T.order, T.on_off, T.lora, T.strength, T.trigger, T.note, T.url, T.del].forEach((label, i) => {
                 ctx.textAlign = "center";
                 ctx.fillText(label, x + cols[i] / 2, y + HEADER_H / 2);
                 x += cols[i] + GAP;
@@ -375,8 +376,16 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             // 内容从底板内 INNER_PAD 处开始，开关/删除按钮不再贴底板边缘
             let x = PAD + INNER_PAD;
 
+            // 序号（点击输入目标位置进行排序）
+            drawBox(ctx, x, ry + 4, cols[0], rh - 8, 4, "#1e1e28", "#35354a");
+            ctx.fillStyle = "#8a8a9a";
+            ctx.font = "bold 11px 'Courier New', monospace";
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText(String(rowIndex + 1), x + cols[0] / 2, ry + rh / 2);
+            x += cols[0] + GAP;
+
             // 修复2：胶囊严格居中在TOGGLE_W列内，不超出
-            const tx = x + (cols[0] - TOG_W) / 2;
+            const tx = x + (cols[1] - TOG_W) / 2;
             const ty = ry + (rh - TOG_H) / 2;
             drawBox(ctx, tx, ty, TOG_W, TOG_H, TOG_H / 2,
                 row.enabled ? "#2e7d32" : "#424242",
@@ -385,10 +394,10 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             const knobX = row.enabled ? tx + TOG_W - knobR - 2 : tx + knobR + 2;
             ctx.beginPath(); ctx.arc(knobX, ty + TOG_H / 2, knobR, 0, Math.PI * 2);
             ctx.fillStyle = "#fff"; ctx.fill();
-            x += cols[0] + GAP;
+            x += cols[1] + GAP;
 
             // LoRA下拉
-            const lx = x, lw = cols[1];
+            const lx = x, lw = cols[2];
             drawBox(ctx, lx, ry + 4, lw, rh - 8, 4, "#252525", "#3a3a3a");
             ctx.save(); ctx.rect(lx + 6, ry, lw - 20, rh + 6); ctx.clip();
             ctx.fillStyle = row.lora === "None" ? "#555" : "#ddd";
@@ -404,7 +413,7 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             x += lw + GAP;
 
             // 权重（带左右箭头微调 & 拖拽调整）
-            const sx = x, sw = cols[2];
+            const sx = x, sw = cols[3];
             drawBox(ctx, sx, ry + 4, sw, rh - 8, 4, "#252525", "#3a3a3a");
 
             // 左右箭头（各占约10px）
@@ -446,25 +455,25 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             x += sw + GAP;
 
             // 触发词
-            drawBox(ctx, x, ry + 4, cols[3], rh - 8, 4, "#1e1e28", "#35354a");
-            ctx.save(); ctx.rect(x + 4, ry, cols[3] - 8, rh + 6); ctx.clip();
+            drawBox(ctx, x, ry + 4, cols[4], rh - 8, 4, "#1e1e28", "#35354a");
+            ctx.save(); ctx.rect(x + 4, ry, cols[4] - 8, rh + 6); ctx.clip();
             ctx.fillStyle = row.trigger ? "#e8c87e" : "#444";
             ctx.font = "10px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
             ctx.fillText(row.trigger || T.trigger_ph, x + 6, ry + rh / 2);
             ctx.restore();
-            x += cols[3] + GAP;
+            x += cols[4] + GAP;
 
             // 备注
-            drawBox(ctx, x, ry + 4, cols[4], rh - 8, 4, "#1e1e28", "#35354a");
-            ctx.save(); ctx.rect(x + 4, ry, cols[4] - 8, rh + 6); ctx.clip();
+            drawBox(ctx, x, ry + 4, cols[5], rh - 8, 4, "#1e1e28", "#35354a");
+            ctx.save(); ctx.rect(x + 4, ry, cols[5] - 8, rh + 6); ctx.clip();
             ctx.fillStyle = row.note ? "#aaa" : "#444";
             ctx.font = "11px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
             ctx.fillText(row.note || T.note_ph, x + 6, ry + rh / 2);
             ctx.restore();
-            x += cols[4] + GAP;
+            x += cols[5] + GAP;
 
             // 网址按钮：未配置=灰色＋，已配置=绿色↗
-            const us = rh - 8, ux = x + (cols[5] - us) / 2, uy = ry + 4;
+            const us = rh - 8, ux = x + (cols[6] - us) / 2, uy = ry + 4;
             const hasUrl = !!(row.url && /^https?:\/\//i.test(row.url.trim()));
             drawBox(ctx, ux, uy, us, us, 5,
                 hasUrl ? "#0f3a1a" : "#2a2a2a",
@@ -473,10 +482,10 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
             ctx.font = `bold ${Math.floor(us * 0.55)}px sans-serif`;
             ctx.textAlign = "center"; ctx.textBaseline = "middle";
             ctx.fillText(hasUrl ? "↗" : "＋", ux + us / 2, uy + us / 2 + 0.5);
-            x += cols[5] + GAP;
+            x += cols[6] + GAP;
 
-            // 删除
-            const bs = rh - 8, bx = x + (cols[5] - bs) / 2, by = ry + 4;
+            // 删除（列宽=按钮宽，居中即占满）
+            const bs = rh - 8, bx = x + (cols[7] - bs) / 2, by = ry + 4;
             drawBox(ctx, bx, by, bs, bs, 5, "#6a0000", "#c0392b");
             ctx.fillStyle = "#ff6b6b";
             ctx.font = `bold ${Math.floor(bs * 0.58)}px sans-serif`;
@@ -521,16 +530,34 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
 
             const cols = colWidths(ww);
             let x = PAD + INNER_PAD;
-            if (mx >= x && mx < x + cols[0]) { row.enabled = !row.enabled; onchange(); return true; }
+            // 序号列：点击输入目标位置进行排序
+            if (mx >= x && mx < x + cols[0]) {
+                const total = node._loraRows.length;
+                app.canvas.prompt(T.prompt_order, String(rowIndex + 1), (val) => {
+                    const n = parseInt(val, 10);
+                    if (!Number.isFinite(n)) return;
+                    let target = Math.round(n);
+                    if (target < 1) target = 1;
+                    if (target > total) target = total;
+                    if (target === rowIndex + 1) return;
+                    const rows = node._loraRows;
+                    const item = rows.splice(rowIndex, 1)[0];
+                    rows.splice(target - 1, 0, item);
+                    node._rebuild(rows);
+                }, e);
+                return true;
+            }
             x += cols[0] + GAP;
-            if (mx >= x && mx < x + cols[1]) {
+            if (mx >= x && mx < x + cols[1]) { row.enabled = !row.enabled; onchange(); return true; }
+            x += cols[1] + GAP;
+            if (mx >= x && mx < x + cols[2]) {
                 const rect = app.canvas.canvas.getBoundingClientRect();
                 const scale = app.canvas.ds?.scale ?? 1;
                 const off = app.canvas.ds?.offset ?? [0, 0];
                 const sx = rect.left + (node.pos[0] + x) * scale + off[0] * scale;
                 const sy = rect.top + (node.pos[1] + y + ROW_H) * scale + off[1] * scale;
                 domDropdown.show(loraList, row.lora,
-                    { left: sx, top: sy, bottom: sy, width: cols[1] * scale },
+                    { left: sx, top: sy, bottom: sy, width: cols[2] * scale },
                     (sel) => {
                         row.lora = sel;
                         if (sel !== "None") {
@@ -548,8 +575,8 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
                     });
                 return true;
             }
-            x += cols[1] + GAP;
-            if (mx >= x && mx < x + cols[2]) {
+            x += cols[2] + GAP;
+            if (mx >= x && mx < x + cols[3]) {
                 // 左箭头点击
                 if (this._arrowLL !== undefined &&
                     mx >= this._arrowLL && mx <= this._arrowLR &&
@@ -580,8 +607,8 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
                 }
                 return false;
             }
-            x += cols[2] + GAP;
-            if (mx >= x && mx < x + cols[3]) {
+            x += cols[3] + GAP;
+            if (mx >= x && mx < x + cols[4]) {
                 app.canvas.prompt(T.prompt_trigger, row.trigger || "", (val) => {
                     row.trigger = val;
                     if (row.lora !== "None") {
@@ -591,13 +618,13 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
                 }, e);
                 return true;
             }
-            x += cols[3] + GAP;
-            if (mx >= x && mx < x + cols[4]) {
+            x += cols[4] + GAP;
+            if (mx >= x && mx < x + cols[5]) {
                 app.canvas.prompt(T.prompt_note, row.note, (val) => { row.note = val; onchange(); }, e);
                 return true;
             }
-            x += cols[4] + GAP;
-            if (mx >= x && mx < x + cols[5]) {
+            x += cols[5] + GAP;
+            if (mx >= x && mx < x + cols[6]) {
                 const url = row.url || "";
                 if (/^https?:\/\//i.test(url.trim())) {
                     // 有网址：点击跳转（Ctrl/Shift+点击 编辑）
@@ -612,8 +639,8 @@ function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
                 }
                 return true;
             }
-            x += cols[5] + GAP;
-            if (mx >= x && mx < x + cols[6]) { onDelete(); return true; }
+            x += cols[6] + GAP;
+            if (mx >= x && mx < x + cols[7]) { onDelete(); return true; }
             return false;
         }
     };
@@ -657,6 +684,16 @@ app.registerExtension({
         }
 
         if (node.size[0] < NODE_MIN_W) node.size[0] = NODE_MIN_W;
+
+        // 拖拽缩放的宽度下限：防止把节点拖到内容显示不全（仅限宽度，高度自由）
+        if (!node._minWidthPatched) {
+            node._minWidthPatched = true;
+            const origOnResize = node.onResize;
+            node.onResize = function (size) {
+                if (size[0] < NODE_MIN_W) size[0] = NODE_MIN_W;
+                return origOnResize?.call(this, size);
+            };
+        }
 
         let loraList = ["None"];
         try {
