@@ -209,7 +209,9 @@ app.registerExtension({
             ];
 
             const container = document.createElement("div");
-            container.style.cssText = `display:flex;flex-direction:column;gap:${GAP}px;padding:4px;box-sizing:border-box;width:100%;`;
+            // flex:0 0 auto —— 防止 Nodes 2.0 下被 WidgetDOM 容器（*:flex-1）拉伸，
+            // 导致 scrollHeight 测量失真、删除预设后节点高度不收缩（经典模式此属性无副作用）。
+            container.style.cssText = `display:flex;flex-direction:column;gap:${GAP}px;padding:4px;box-sizing:border-box;width:100%;flex:0 0 auto;`;
             this._presetContainer = container;
 
             this._domWidget = this.addDOMWidget("_ui", "div", container, { serialize: false });
@@ -237,7 +239,7 @@ app.registerExtension({
                 });
             }
 
-            if (this.size[0] < NODE_MIN_W) this.size[0] = NODE_MIN_W;
+            if (this.size[0] < NODE_MIN_W) this.size = [NODE_MIN_W, this.size[1]];
 
             requestAnimationFrame(() => this._render());
         };

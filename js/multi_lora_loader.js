@@ -7,42 +7,30 @@ const I18N = {
     en: { on_off: "On/Off", lora: "LoRA", strength: "Strength", note: "Note", del: "Del",
           trigger: "Trigger", trigger_ph: "(none)", url: "URL", order: "#",
           select: "Select LoRA...", add: "＋ Add LoRA", note_ph: "Note...",
-          prompt_strength: "Strength", prompt_note: "Note", prompt_trigger: "Trigger",
-          prompt_url: "URL (paste download page link)", prompt_order: "Move to position",
+          prompt_url: "URL (paste download page link)",
           root_dir: "— Root —" },
     zh: { on_off: "开关", lora: "LoRA", strength: "权重", note: "备注", del: "删除",
           trigger: "触发词", trigger_ph: "(无)", url: "网址", order: "序",
           select: "选择 LoRA...", add: "＋ 添加 LoRA", note_ph: "备注...",
-          prompt_strength: "权重", prompt_note: "备注", prompt_trigger: "触发词",
-          prompt_url: "网址（粘贴下载页链接）", prompt_order: "移动到第几位",
+          prompt_url: "网址（粘贴下载页链接）",
           root_dir: "— 根目录 —" },
 };
 const T = I18N[LANG] ?? I18N.en;
 
-
-const ROW_H = 30;
-const PAD = 10;          // 底板/整体距节点边界
-const INNER_PAD = 4;     // 底板内：内容（开关/输入框/删除）距底板边缘的呼吸空间
-const HEADER_H = 22;
-const STRENGTH_W = 62;
-const TOGGLE_W = 32;   // 给胶囊留足够宽度
-const DEL_W = 22;      // 删除按钮列（= 按钮尺寸，与网址列等宽）
-const URL_W = 22;      // 网址按钮（小）
-const ORDER_W = 22;    // 序号列（点击输入目标位置排序）
-const NOTE_RATIO = 0.28;
-const DROPDOWN_ITEM_H = 24;
-const DROPDOWN_MAX = 12;
-const NODE_MIN_W = 500;   // 最小/默认宽度（拖拽下限，旧节点也会被矫正）
-const GAP = 5;
-
-// 胶囊尺寸：严格小于TOGGLE_W
-const TOG_W = 28, TOG_H = 16;
-
-function colWidths(totalW) {
-    const avail = totalW - (PAD + INNER_PAD) * 2 - ORDER_W - TOGGLE_W - STRENGTH_W - DEL_W - URL_W - 7 * GAP;
-    const noteW = Math.floor(avail * 0.20);
-    const triggerW = Math.floor(avail * 0.20);
-    return [ORDER_W, TOGGLE_W, avail - noteW - triggerW, STRENGTH_W, triggerW, noteW, URL_W, DEL_W];
+// 最小宽度（拖拽下限，经典 / Nodes 2.0 两种渲染模式都生效）
+const NODE_MIN_W = 500;
+// 行内固定列宽（名字列自适应剩余空间）
+const COL = { order: 22, toggle: 32, strength: 66, trigger: 68, note: 78, url: 22, del: 22 };
+const ROW_GAP = 4;
+// 顶部槽位区预留（经典模式会随"贴合校正"动态学习增大，保证此后一步到位）
+const VUE_RESERVE = 60;
+let CLASSIC_RESERVE = 84;
+// 内容区自然高度下限（表头 16 + 添加按钮 ~32 + padding 8 + 行 30 + gap 5）。
+// 实测 1 行 ≈ 97，18 行 ≈ 692。用来拒绝“布局未完成”的偏小测量，
+// 避免把节点窗口打回默认高度、内容整块冒出框外。
+function expectedContentH(rowCount) {
+    const n = Math.max(1, rowCount | 0);
+    return 61 + n * 35;
 }
 
 // ---------- LoRA preview (ComfyUI /experiment/models/preview) ----------
@@ -115,6 +103,7 @@ class HoverPreview {
 }
 const hoverPreview = new HoverPreview();
 
+// ---------- 下拉框（body 上的 DOM 浮层；锚点直接使用元素 rect，两种渲染模式通用） ----------
 class DomDropdown {
     constructor() {
         this.el = document.createElement("div");
@@ -122,7 +111,6 @@ class DomDropdown {
             position: "fixed", zIndex: "99999", background: "#1c1c1c",
             border: "1px solid #4a8a4a", borderRadius: "6px", overflowY: "auto",
             boxShadow: "0 6px 20px rgba(0,0,0,0.8)", display: "none",
-            maxHeight: `${DROPDOWN_MAX * DROPDOWN_ITEM_H}px`,
         });
         document.body.appendChild(this.el);
         this._onOutside = (e) => { if (!this.el.contains(e.target)) this.hide(); };
@@ -130,14 +118,13 @@ class DomDropdown {
     show(items, selectedItem, anchorRect, onSelect) {
         this.el.innerHTML = "";
 
-        // Build folder tree from flat list (paths like "画风/style.safetensors" or "角色\\xxx.safetensors")
+        // 按文件夹分组（路径如 "画风/style.safetensors" 或 "角色\\xxx.safetensors"）
         const rootFiles = [];
-        const folderMap = new Map(); // folderName -> [fileBaseNames]
-        const originalMap = new Map(); // normalizedPath -> originalPath
+        const folderMap = new Map();
+        const originalMap = new Map();
 
         for (const item of items) {
             if (item === "None") continue;
-            // Normalize path separators to forward slash for consistent parsing
             const normalized = item.replace(/\\/g, "/");
             originalMap.set(normalized, item);
             const idx = normalized.lastIndexOf("/");
@@ -155,18 +142,16 @@ class DomDropdown {
         const sortedDirs = [...folderMap.keys()].sort();
         for (const dir of sortedDirs) folderMap.get(dir).sort();
 
-        // Normalize selectedItem for consistent comparison
         const selectedNormalized = (selectedItem && selectedItem !== "None")
             ? selectedItem.replace(/\\/g, "/") : selectedItem;
 
-        // Auto-expand the folder containing the currently selected item
         const expandDirs = new Set();
         if (selectedNormalized) {
             const si = selectedNormalized.lastIndexOf("/");
             if (si !== -1) expandDirs.add(selectedNormalized.substring(0, si));
         }
 
-        // ----- "None" (always first) -----
+        // ----- "None"（始终第一个） -----
         const noneDiv = document.createElement("div");
         noneDiv.textContent = "— None —";
         Object.assign(noneDiv.style, {
@@ -180,7 +165,7 @@ class DomDropdown {
         noneDiv.addEventListener("mousedown", (e) => { e.stopPropagation(); onSelect("None"); this.hide(); });
         this.el.appendChild(noneDiv);
 
-        // ----- Helper: render a single LoRA file row -----
+        // ----- 单个 LoRA 行 -----
         const makeFileRow = (displayName, fullPathNormalized) => {
             const originalPath = originalMap.get(fullPathNormalized) || fullPathNormalized;
             const div = document.createElement("div");
@@ -194,8 +179,7 @@ class DomDropdown {
             div.addEventListener("mouseout", () => div.style.background = selectedNormalized === fullPathNormalized ? "#1a3a5a" : "transparent");
             div.addEventListener("mousedown", (e) => { e.stopPropagation(); onSelect(originalPath); this.hide(); });
 
-            // LoRA preview: 有同名/同名.preview 图片时，名字后面显示小缩略图 + hover 浮层大图
-            // 缩略图放名字后面，无图行不占位，保持名字与常规对齐
+            // 缩略图：有同名/同名.preview 图片时，名字后面显示小缩略图 + hover 浮层大图
             const pUrl = previewUrlFor(originalPath);
             const nameSpan = document.createElement("span");
             nameSpan.textContent = displayName;
@@ -213,7 +197,7 @@ class DomDropdown {
                     borderRadius: "3px", flexShrink: "0", display: "none"
                 });
                 thumb.addEventListener("load", () => { thumb.style.display = "block"; });
-                thumb.addEventListener("error", () => { thumb.remove(); noPreviewSet.add(originalPath); }); // 无图：移除并记忆
+                thumb.addEventListener("error", () => { thumb.remove(); noPreviewSet.add(originalPath); });
                 div.appendChild(thumb);
 
                 div.addEventListener("mouseenter", () => {
@@ -224,7 +208,7 @@ class DomDropdown {
             return div;
         };
 
-        // ----- Render folders -----
+        // ----- 文件夹 -----
         for (const dir of sortedDirs) {
             const files = folderMap.get(dir);
             const expanded = expandDirs.has(dir);
@@ -262,9 +246,8 @@ class DomDropdown {
             this.el.appendChild(children);
         }
 
-        // ----- Root-level files (no subdirectory) -----
+        // ----- 根目录文件 -----
         if (rootFiles.length > 0 && sortedDirs.length > 0) {
-            // Add a separator between the last folder and root-level files
             const sep = document.createElement("div");
             Object.assign(sep.style, {
                 height: "1px", margin: "4px 12px",
@@ -286,10 +269,11 @@ class DomDropdown {
             this.el.appendChild(makeFileRow(displayName, file));
         }
 
-        // ----- Position & show -----
+        // ----- 定位与显示（anchorRect 为锚点元素的 getBoundingClientRect()） -----
         this.el.style.display = "block";
-        this.el.style.width = anchorRect.width + "px";
-        this.el.style.left = anchorRect.left + "px";
+        const w = Math.max(anchorRect.width, 260);
+        this.el.style.width = w + "px";
+        this.el.style.left = Math.max(4, Math.min(anchorRect.left, window.innerWidth - w - 8)) + "px";
         const spaceBelow = window.innerHeight - anchorRect.bottom;
         const spaceAbove = anchorRect.top;
         this.el.style.maxHeight = Math.min(Math.max(spaceBelow, spaceAbove) - 20, 480) + "px";
@@ -309,383 +293,79 @@ class DomDropdown {
         hoverPreview.hide();
         document.removeEventListener("mousedown", this._onOutside, true);
         document.removeEventListener("pointerdown", this._onOutside, true);
-        app.canvas?.setDirty(true);
     }
 }
 const domDropdown = new DomDropdown();
 
+// ---------- 行数据工具 ----------
 function parseRows(val) {
     try {
         const rows = JSON.parse(val || "[]");
         if (Array.isArray(rows) && rows.length) return rows;
-    } catch {}
+    } catch (e) { }
     return null;
 }
 function defaultRows() {
     return [{ enabled: true, lora: "None", strength: 1.0, trigger: "", note: "", url: "" }];
 }
-
-function drawBox(ctx, x, y, w, h, r, fill, stroke) {
-    ctx.beginPath(); ctx.roundRect(x, y, w, h, r);
-    ctx.fillStyle = fill; ctx.fill();
-    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+function loraBasename(path) {
+    return (path || "").replace(/\.(safetensors|pt|ckpt)$/i, "").split(/[\\/]/).pop();
 }
+const hasUrlRe = /^https?:\/\//i;
 
-function makeHeaderWidget() {
-    return {
-        name: "__lora_header", type: "custom_lora_header",
-        value: null, serialize: false,
-        computeSize(ww) { return [ww, HEADER_H]; },
-        draw(ctx, node, ww, y) {
-            const cols = colWidths(ww);
-            let x = PAD + INNER_PAD;
-            ctx.fillStyle = "#606060";
-            ctx.font = "10px sans-serif";
-            ctx.textBaseline = "middle";
-            [T.order, T.on_off, T.lora, T.strength, T.trigger, T.note, T.url, T.del].forEach((label, i) => {
-                ctx.textAlign = "center";
-                ctx.fillText(label, x + cols[i] / 2, y + HEADER_H / 2);
-                x += cols[i] + GAP;
-            });
-        },
-        mouse() { return false; }
-    };
-}
-
-function makeLoraRowWidget(node, row, rowIndex, loraList, onDelete, onchange) {
-    const setUrl = (val) => {
-        row.url = (val || "").trim();
-        if (row.lora !== "None") {
-            try { localStorage.setItem("lora_url_" + row.lora, row.url); } catch (e) {}
-        }
-        onchange();
-    };
-    return {
-        name: `__lora_row_${rowIndex}`, type: "custom_lora_row",
-        value: null, serialize: false,
-        computeSize(ww) { return [ww, ROW_H + 6]; },
-        draw(ctx, node, ww, y) {
-            this._lastY = y; this._lastW = ww;
-            const cols = colWidths(ww);
-            const ry = y + 3, rh = ROW_H;
-
-            drawBox(ctx, PAD, ry, ww - PAD * 2, rh, 6,
-                row.enabled ? "#1a2a1a" : "#271818",
-                row.enabled ? "#2d5a2d" : "#5a2d2d");
-
-            // 内容从底板内 INNER_PAD 处开始，开关/删除按钮不再贴底板边缘
-            let x = PAD + INNER_PAD;
-
-            // 序号（点击输入目标位置进行排序）
-            drawBox(ctx, x, ry + 4, cols[0], rh - 8, 4, "#1e1e28", "#35354a");
-            ctx.fillStyle = "#8a8a9a";
-            ctx.font = "bold 11px 'Courier New', monospace";
-            ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.fillText(String(rowIndex + 1), x + cols[0] / 2, ry + rh / 2);
-            x += cols[0] + GAP;
-
-            // 修复2：胶囊严格居中在TOGGLE_W列内，不超出
-            const tx = x + (cols[1] - TOG_W) / 2;
-            const ty = ry + (rh - TOG_H) / 2;
-            drawBox(ctx, tx, ty, TOG_W, TOG_H, TOG_H / 2,
-                row.enabled ? "#2e7d32" : "#424242",
-                row.enabled ? "#43a047" : "#555");
-            const knobR = TOG_H / 2 - 2;
-            const knobX = row.enabled ? tx + TOG_W - knobR - 2 : tx + knobR + 2;
-            ctx.beginPath(); ctx.arc(knobX, ty + TOG_H / 2, knobR, 0, Math.PI * 2);
-            ctx.fillStyle = "#fff"; ctx.fill();
-            x += cols[1] + GAP;
-
-            // LoRA下拉
-            const lx = x, lw = cols[2];
-            drawBox(ctx, lx, ry + 4, lw, rh - 8, 4, "#252525", "#3a3a3a");
-            ctx.save(); ctx.rect(lx + 6, ry, lw - 20, rh + 6); ctx.clip();
-            ctx.fillStyle = row.lora === "None" ? "#555" : "#ddd";
-            ctx.font = "11.5px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-            ctx.fillText(
-                row.lora === "None" ? T.select:
-                    row.lora.replace(/\.(safetensors|pt|ckpt)$/i, "").split(/[\\/]/).pop(),
-                lx + 7, ry + rh / 2);
-            ctx.restore();
-            ctx.fillStyle = "#666"; ctx.font = "10px sans-serif";
-            ctx.textAlign = "right"; ctx.textBaseline = "middle";
-            ctx.fillText("▾", lx + lw - 5, ry + rh / 2);
-            x += lw + GAP;
-
-            // 权重（带左右箭头微调 & 拖拽调整）
-            const sx = x, sw = cols[3];
-            drawBox(ctx, sx, ry + 4, sw, rh - 8, 4, "#252525", "#3a3a3a");
-
-            // 左右箭头（各占约10px）
-            const arrowW = 10;
-            const aY = ry + 4, aH = rh - 8;
-            // 左箭头点击区
-            this._arrowLL = sx; this._arrowLR = sx + arrowW;
-            this._arrowLT = aY; this._arrowLB = aY + aH;
-            ctx.fillStyle = "#666";
-            ctx.font = "bold 10px sans-serif";
-            ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.fillText("◀", sx + arrowW / 2 + 1, aY + aH / 2 + 0.5);
-            // 右箭头点击区
-            this._arrowRL = sx + sw - arrowW; this._arrowRR = sx + sw;
-            this._arrowRT = aY; this._arrowRB = aY + aH;
-            ctx.fillText("▶", sx + sw - arrowW / 2 - 1, aY + aH / 2 + 0.5);
-
-            // 中间数值
-            ctx.fillStyle = row.strength === 1.0 ? "#aaa" : "#7ec8e3";
-            ctx.font = "12px 'Courier New', monospace";
-            ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.fillText(row.strength.toFixed(2), sx + sw / 2, ry + rh / 2);
-
-            // 拖拽区（中间数值区域）
-            this._dragL = sx + arrowW; this._dragR = sx + sw - arrowW;
-            this._dragT = aY; this._dragB = aY + aH;
-
-            // 拖拽时的视觉反馈提示线
-            if (this._dragHint !== undefined) {
-                ctx.strokeStyle = "#7ec8e3";
-                ctx.lineWidth = 1;
-                ctx.setLineDash([2, 2]);
-                ctx.beginPath();
-                ctx.moveTo(this._dragHint, aY);
-                ctx.lineTo(this._dragHint, aY + aH);
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-            x += sw + GAP;
-
-            // 触发词
-            drawBox(ctx, x, ry + 4, cols[4], rh - 8, 4, "#1e1e28", "#35354a");
-            ctx.save(); ctx.rect(x + 4, ry, cols[4] - 8, rh + 6); ctx.clip();
-            ctx.fillStyle = row.trigger ? "#e8c87e" : "#444";
-            ctx.font = "10px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-            ctx.fillText(row.trigger || T.trigger_ph, x + 6, ry + rh / 2);
-            ctx.restore();
-            x += cols[4] + GAP;
-
-            // 备注
-            drawBox(ctx, x, ry + 4, cols[5], rh - 8, 4, "#1e1e28", "#35354a");
-            ctx.save(); ctx.rect(x + 4, ry, cols[5] - 8, rh + 6); ctx.clip();
-            ctx.fillStyle = row.note ? "#aaa" : "#444";
-            ctx.font = "11px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-            ctx.fillText(row.note || T.note_ph, x + 6, ry + rh / 2);
-            ctx.restore();
-            x += cols[5] + GAP;
-
-            // 网址按钮：未配置=灰色＋，已配置=绿色↗
-            const us = rh - 8, ux = x + (cols[6] - us) / 2, uy = ry + 4;
-            const hasUrl = !!(row.url && /^https?:\/\//i.test(row.url.trim()));
-            drawBox(ctx, ux, uy, us, us, 5,
-                hasUrl ? "#0f3a1a" : "#2a2a2a",
-                hasUrl ? "#2e9e4f" : "#4a4a4a");
-            ctx.fillStyle = hasUrl ? "#5ccf7a" : "#8a8a8a";
-            ctx.font = `bold ${Math.floor(us * 0.55)}px sans-serif`;
-            ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.fillText(hasUrl ? "↗" : "＋", ux + us / 2, uy + us / 2 + 0.5);
-            x += cols[6] + GAP;
-
-            // 删除（列宽=按钮宽，居中即占满）
-            const bs = rh - 8, bx = x + (cols[7] - bs) / 2, by = ry + 4;
-            drawBox(ctx, bx, by, bs, bs, 5, "#6a0000", "#c0392b");
-            ctx.fillStyle = "#ff6b6b";
-            ctx.font = `bold ${Math.floor(bs * 0.58)}px sans-serif`;
-            ctx.textAlign = "center"; ctx.textBaseline = "middle";
-            ctx.fillText("✕", bx + bs / 2, by + bs / 2);
-        },
-        mouse(e, pos, node) {
-            const [mx, my] = pos;
-            const ww = this._lastW || node.size[0];
-            const y = this._lastY || 0;
-
-            // 拖拽调整权重（左右拖动，向右增大，向左减小）
-            if (this._dragging && e.type === "pointermove") {
-                const dx = mx - this._dragStartX;
-                const delta = dx * 0.001; // 移动1px ≈ 0.001
-                let v = Math.round((this._dragStartVal + delta) * 100) / 100;
-                if (v < -100) v = -100; if (v > 100) v = 100;
-                if (v !== row.strength) {
-                    row.strength = v;
-                    this._dragChanged = true;  // 权重确实变过，说明是拖拽行为
-                    onchange();
-                }
-                return true;
-            }
-            if (this._dragging && (e.type === "pointerup" || e.type === "pointerleave")) {
-                this._dragging = false;
-                const changed = this._dragChanged;
-                this._dragChanged = false;
-                // 只有权重从未变过才算"点击"，弹出输入框；拖拽过（即使拖回原位）不弹
-                if (e.type === "pointerup" && !changed) {
-                    app.canvas.prompt(T.prompt_strength, row.strength.toFixed(2), (val) => {
-                        const n = parseFloat(val);
-                        if (!isNaN(n)) { row.strength = Math.round(n * 100) / 100; onchange(); }
-                    }, e);
-                }
-                app.canvas?.setDirty(true, true);
-                return true;
-            }
-
-            if (e.type !== "pointerdown") return false;
-            if (my < y || my > y + ROW_H + 6) return false;
-
-            const cols = colWidths(ww);
-            let x = PAD + INNER_PAD;
-            // 序号列：点击输入目标位置进行排序
-            if (mx >= x && mx < x + cols[0]) {
-                const total = node._loraRows.length;
-                app.canvas.prompt(T.prompt_order, String(rowIndex + 1), (val) => {
-                    const n = parseInt(val, 10);
-                    if (!Number.isFinite(n)) return;
-                    let target = Math.round(n);
-                    if (target < 1) target = 1;
-                    if (target > total) target = total;
-                    if (target === rowIndex + 1) return;
-                    const rows = node._loraRows;
-                    const item = rows.splice(rowIndex, 1)[0];
-                    rows.splice(target - 1, 0, item);
-                    node._rebuild(rows);
-                }, e);
-                return true;
-            }
-            x += cols[0] + GAP;
-            if (mx >= x && mx < x + cols[1]) { row.enabled = !row.enabled; onchange(); return true; }
-            x += cols[1] + GAP;
-            if (mx >= x && mx < x + cols[2]) {
-                const rect = app.canvas.canvas.getBoundingClientRect();
-                const scale = app.canvas.ds?.scale ?? 1;
-                const off = app.canvas.ds?.offset ?? [0, 0];
-                const sx = rect.left + (node.pos[0] + x) * scale + off[0] * scale;
-                const sy = rect.top + (node.pos[1] + y + ROW_H) * scale + off[1] * scale;
-                domDropdown.show(loraList, row.lora,
-                    { left: sx, top: sy, bottom: sy, width: cols[2] * scale },
-                    (sel) => {
-                        row.lora = sel;
-                        if (sel !== "None") {
-                            try {
-                                var t = localStorage.getItem("lora_trigger_" + sel);
-                                row.trigger = t !== null ? t : "";
-                                var u = localStorage.getItem("lora_url_" + sel);
-                                row.url = u !== null ? u : "";
-                            } catch(e) {}
-                        } else {
-                            row.trigger = "";
-                            row.url = "";
-                        }
-                        onchange();
-                    });
-                return true;
-            }
-            x += cols[2] + GAP;
-            if (mx >= x && mx < x + cols[3]) {
-                // 左箭头点击
-                if (this._arrowLL !== undefined &&
-                    mx >= this._arrowLL && mx <= this._arrowLR &&
-                    my >= this._arrowLT && my <= this._arrowLB) {
-                    const v = row.strength - 0.01;
-                    row.strength = Math.round(Math.max(-100, v) * 100) / 100;
-                    onchange();
-                    return true;
-                }
-                // 右箭头点击
-                if (this._arrowRL !== undefined &&
-                    mx >= this._arrowRL && mx <= this._arrowRR &&
-                    my >= this._arrowRT && my <= this._arrowRB) {
-                    const v = row.strength + 0.01;
-                    row.strength = Math.round(Math.min(100, v) * 100) / 100;
-                    onchange();
-                    return true;
-                }
-                // 中间数值区：点击可直接输入，按住拖拽可快速调整（左右水平拖拽）
-                if (this._dragL !== undefined &&
-                    mx >= this._dragL && mx <= this._dragR &&
-                    my >= this._dragT && my <= this._dragB) {
-                    this._dragging = true;
-                    this._dragChanged = false;
-                    this._dragStartVal = row.strength;
-                    this._dragStartX = mx;
-                    return true;
-                }
-                return false;
-            }
-            x += cols[3] + GAP;
-            if (mx >= x && mx < x + cols[4]) {
-                app.canvas.prompt(T.prompt_trigger, row.trigger || "", (val) => {
-                    row.trigger = val;
-                    if (row.lora !== "None") {
-                        try { localStorage.setItem("lora_trigger_" + row.lora, val); } catch(e) {}
-                    }
-                    onchange();
-                }, e);
-                return true;
-            }
-            x += cols[4] + GAP;
-            if (mx >= x && mx < x + cols[5]) {
-                app.canvas.prompt(T.prompt_note, row.note, (val) => { row.note = val; onchange(); }, e);
-                return true;
-            }
-            x += cols[5] + GAP;
-            if (mx >= x && mx < x + cols[6]) {
-                const url = row.url || "";
-                if (/^https?:\/\//i.test(url.trim())) {
-                    // 有网址：点击跳转（Ctrl/Shift+点击 编辑）
-                    if (e.ctrlKey || e.shiftKey) {
-                        app.canvas.prompt(T.prompt_url, url, (val) => { setUrl(val); }, e);
-                    } else {
-                        window.open(url.trim(), "_blank");
-                    }
-                } else {
-                    // 无网址：弹出输入框
-                    app.canvas.prompt(T.prompt_url, url, (val) => { setUrl(val); }, e);
-                }
-                return true;
-            }
-            x += cols[6] + GAP;
-            if (mx >= x && mx < x + cols[7]) { onDelete(); return true; }
-            return false;
-        }
-    };
-}
-
-// 修复3：自定义添加按钮widget，文字真正垂直居中
-function makeAddButtonWidget(onClick) {
-    const BTN_H = 28;
-    return {
-        name: "__lora_add_btn", type: "custom_lora_add",
-        value: null, serialize: false,
-        computeSize(ww) { return [ww, BTN_H + 8]; },
-        draw(ctx, node, ww, y) {
-            this._lastY = y;
-            drawBox(ctx, PAD, y + 4, ww - PAD * 2, BTN_H, 6, "#1e1e1e", "#404040");
-            ctx.fillStyle = "#7c6cf0";
-            ctx.font = "bold 13px sans-serif";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";   // 真正居中
-            ctx.fillText(T.add, ww / 2, y + 4 + BTN_H / 2);
-        },
-        mouse(e, pos) {
-            if (e.type !== "pointerdown") return false;
-            const [, my] = pos;
-            const y = this._lastY || 0;
-            if (my >= y + 4 && my <= y + 4 + BTN_H) { onClick(); return true; }
-            return false;
-        }
-    };
-}
-
+// ---------- 节点（DOM 渲染，和 Prompt Segments / Resolution Switcher 相同架构） ----------
 app.registerExtension({
     name: "MultiLoraLoader",
     async nodeCreated(node) {
         if (node.comfyClass !== "MultiLoraLoader") return;
 
+        // lora_stack 隐藏：两种渲染模式都认 hidden（值照常保存/恢复）
         const stackWidget = node.widgets?.find(w => w.name === "lora_stack");
         if (stackWidget) {
-            stackWidget.computeSize = () => [0, -4];
-            stackWidget.draw = () => {};
+            stackWidget.hidden = true;
+            if (!stackWidget.options) stackWidget.options = {};
+            stackWidget.options.hidden = true;
         }
 
-        if (node.size[0] < NODE_MIN_W) node.size[0] = NODE_MIN_W;
+        // 工作流恢复（含 2.0→1.0 重载）会把 size 写回存档里的默认高度，
+        // 且发生时机可能在我们量完高度之后。钩子必须在 await 之前装上，否则错过 configure。
+        let pendingRefit = false;
+        const refitFromData = () => {
+            if (typeof node._mlRender !== "function") {
+                pendingRefit = true;
+                return;
+            }
+            const parsed = parseRows(stackWidget?.value);
+            if (parsed && JSON.stringify(parsed) !== JSON.stringify(node._mlRows)) {
+                node._mlRows = parsed;
+                node._mlRender();
+                return;
+            }
+            // 已测到内容时同步拉回。configure 是直接写 size，不等这一下，下一帧就会画出“窗口默认、内容冒出”。
+            if (node._mlContentH > 0) {
+                const reserve = window.LiteGraph?.vueNodesMode ? VUE_RESERVE : CLASSIC_RESERVE;
+                const h = node._mlContentH + reserve;
+                if (node.size[1] < h - 2) node.setSize([node.size[0], h]);
+            }
+            try { node._mlApplySize?.(); } catch (e) { }
+        };
+        const origOnConfigure = node.onConfigure;
+        node.onConfigure = function () {
+            const r = origOnConfigure?.apply(this, arguments);
+            refitFromData();
+            return r;
+        };
+        const origAfter = node.onAfterGraphConfigured;
+        node.onAfterGraphConfigured = function () {
+            const r = origAfter?.apply(this, arguments);
+            const run = () => { try { refitFromData(); } catch (e) { } };
+            requestAnimationFrame(run);
+            setTimeout(run, 0);
+            return r;
+        };
 
-        // 拖拽缩放的宽度下限：防止把节点拖到内容显示不全（仅限宽度，高度自由）
+        // 宽度矫正 + 拖拽下限（两种模式通用）
+        if (node.size[0] < NODE_MIN_W) node.size = [NODE_MIN_W, node.size[1]];
         if (!node._minWidthPatched) {
             node._minWidthPatched = true;
             const origOnResize = node.onResize;
@@ -694,46 +374,579 @@ app.registerExtension({
                 return origOnResize?.call(this, size);
             };
         }
+        // 绘制时兜底：无论谁把 size 写回默认高度（configure 直接赋值、模式切换后的迟到恢复），
+        // 下一帧画节点时拉回。只在确实偏矮时动手，不是定时轮询。
+        if (!node._mlDrawFitPatched) {
+            node._mlDrawFitPatched = true;
+            const origDraw = node.onDrawForeground;
+            node.onDrawForeground = function (ctx) {
+                const ret = origDraw?.apply(this, arguments);
+                try {
+                    const rows = this._mlRows?.length || 0;
+                    const floor = rows ? expectedContentH(rows) + 40 : 0;
+                    if (floor && this.size[1] < floor) {
+                        if (this._mlContentH > 0) {
+                            const reserve = window.LiteGraph?.vueNodesMode ? VUE_RESERVE : CLASSIC_RESERVE;
+                            const h = this._mlContentH + reserve;
+                            if (this.size[1] < h - 2) this.setSize([this.size[0], h]);
+                        } else if (!this._mlDrawFitQueued) {
+                            this._mlDrawFitQueued = true;
+                            const run = () => {
+                                if (!this._mlDrawFitQueued) return;
+                                this._mlDrawFitQueued = false;
+                                try { this._mlApplySize?.(); } catch (e) { }
+                            };
+                            requestAnimationFrame(run);
+                            setTimeout(run, 30);
+                        }
+                    }
+                } catch (e) { }
+                return ret;
+            };
+        }
 
+        // 可见性变化时重测高度：初次渲染的测量可能受画布布局/拉伸影响而失真，
+        // 等节点真正上屏后再测一次（经典模式必须有；Vue 模式同样受益）。
+        node._wasVisible = false;
+        if ("IntersectionObserver" in window) {
+            node._visObserver = new IntersectionObserver((entries) => {
+                for (const e of entries) {
+                    if (e.isIntersecting) {
+                        // 从未测到、或窗口仍明显矮于内容（被打回默认高度）时补测。
+                        // 已正常贴合则仅首次可见时复测一次。
+                        const nRows = node._mlRows?.length || 0;
+                        const need = nRows ? expectedContentH(nRows) + 40 : 0;
+                        const tooSmall = !node._mlContentH || (need > 0 && node.size[1] < need);
+                        if (tooSmall || !node._wasVisible) {
+                            node._mlMeasureTries = 0;
+                            try { node._mlApplySize(); } catch (e2) { }
+                        }
+                    }
+                    node._wasVisible = e.isIntersecting;
+                }
+            }, { threshold: 0 });
+            const attachObserver = () => {
+                if (node._visObserver && node._mlDomWidget?.element) {
+                    node._visObserver.observe(node._mlDomWidget.element);
+                }
+            };
+            requestAnimationFrame(attachObserver);
+            setTimeout(attachObserver, 0);
+        }
+        const origOnRemoved = node.onRemoved;
+        node.onRemoved = function () {
+            origOnRemoved?.call(this);
+            if (node._visObserver) { node._visObserver.disconnect(); node._visObserver = null; }
+        };
+
+        // LoRA 列表
         let loraList = ["None"];
         try {
             const resp = await fetch("/object_info/LoraLoader");
             const data = await resp.json();
             const vals = data?.LoraLoader?.input?.required?.lora_name?.[0];
             if (Array.isArray(vals)) loraList = ["None", ...vals];
-        } catch (e) {}
+        } catch (e) { }
 
-        // 预加载 LoRA 目录映射，用于预览图（接口不可用时静默降级）
+        // 预览图目录映射（接口不可用时静默降级）
         loadPathIndexMap();
 
-        node._rebuild = (rows) => {
-            node._loraRows = rows;
-            node.widgets = (node.widgets || []).filter(w =>
-                w.name === "model" || w.name === "lora_stack"
-            );
-            const sw = node.widgets?.find(w => w.name === "lora_stack");
-            if (sw) { sw.computeSize = () => [0, -4]; sw.draw = () => {}; }
+        // 数据（向后兼容：沿用 lora_stack 的 widgets_values 作为持久化载体）
+        node._mlRows = parseRows(stackWidget?.value) ?? defaultRows();
+        node._mlContentH = 0;
 
-            node.addCustomWidget(makeHeaderWidget());
-            rows.forEach((row, i) => {
-                node.addCustomWidget(makeLoraRowWidget(node, row, i, loraList,
-                    () => { rows.splice(i, 1); node._rebuild(rows); },
-                    () => { if (sw) sw.value = JSON.stringify(rows); app.canvas?.setDirty(true, true); }
-                ));
-            });
+        // DOM 容器（flex:0 0 auto —— 防止 Nodes 2.0 下被 WidgetDOM 容器拉伸）
+        const container = document.createElement("div");
+        container.style.cssText =
+            `display:flex;flex-direction:column;gap:5px;padding:4px;box-sizing:border-box;width:100%;flex:0 0 auto;`;
+        node._mlContainer = container;
+        node._mlDomWidget = node.addDOMWidget("_ui", "div", container, {
+            serialize: false,
+            // 2.0 的最小高度读这个；没设时平台默认 50，节点就能缩回默认高度、内容冒出去
+            getMinHeight: () => node._mlContentH || expectedContentH(node._mlRows?.length || 1),
+        });
 
-            // 用自定义widget替代原生button
-            node.addCustomWidget(makeAddButtonWidget(() => {
-                rows.push({ enabled: true, lora: "None", strength: 1.0, trigger: "", note: "", url: "" });
-                node._rebuild(rows);
-            }));
-
-            if (stackWidget) stackWidget.value = JSON.stringify(rows);
-            node.setSize([node.size[0], node.computeSize()[1]]);
-            app.canvas?.setDirty(true, true);
+        // ---- 数据同步（写回 lora_stack，py 端与工作流持久化使用） ----
+        node._mlSync = function () {
+            if (stackWidget) stackWidget.value = JSON.stringify(node._mlRows);
         };
 
-        const initialRows = parseRows(stackWidget?.value) ?? defaultRows();
-        node._rebuild(initialRows);
+        // 平台若用 computeSize()/setSize() 把窗口打回默认高度，这里兜住（内容已测到之后才锁）
+        if (!node._mlComputeSizePatched) {
+            node._mlComputeSizePatched = true;
+            const origCompute = node.computeSize;
+            node.computeSize = function (out) {
+                const sz = origCompute ? origCompute.call(this, out) : (out || [this.size[0], this.size[1]]);
+                const content = this._mlContentH || 0;
+                if (content > 0) {
+                    const reserve = window.LiteGraph?.vueNodesMode ? VUE_RESERVE : CLASSIC_RESERVE;
+                    const need = content + reserve;
+                    if (sz[1] < need) sz[1] = need;
+                }
+                if (sz[0] < NODE_MIN_W) sz[0] = NODE_MIN_W;
+                return sz;
+            };
+            const origSetSize = node.setSize;
+            node.setSize = function (size) {
+                if (this._mlSetSizeGuard) return origSetSize?.call(this, size);
+                if (size && this._mlSizeLock && this._mlContentH > 0) {
+                    const reserve = window.LiteGraph?.vueNodesMode ? VUE_RESERVE : CLASSIC_RESERVE;
+                    const need = this._mlContentH + reserve;
+                    if (size[1] < need - 2) size = [Math.max(size[0], NODE_MIN_W), need];
+                }
+                this._mlSetSizeGuard = true;
+                try {
+                    return origSetSize ? origSetSize.call(this, size) : undefined;
+                } finally {
+                    this._mlSetSizeGuard = false;
+                }
+            };
+        }
+
+        // ---- 高度自适应 ----
+        node._mlApplySize = function () {
+            const dw = node._mlDomWidget;
+            if (!dw) return;
+            dw.element.style.height = "auto";
+            dw.computeSize = () => [0, node._mlContentH || -4];
+            // 双通道调度：正常走 rAF；模式切换/后台加载等时序下 rAF 会被冻结，
+            // setTimeout 兜底保证校正不被拖延（二者只执行其一）。
+            let fired = false;
+            const measure = () => {
+                if (fired) return;
+                fired = true;
+                // 用"子元素累加"测量自然高度（不依赖容器是否被拉伸，避免读到虚高值）
+                let domH = 0;
+                try {
+                    const cs = getComputedStyle(container);
+                    domH = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+                    const gap = parseFloat(cs.rowGap) || 0;
+                    const kids = [...container.children];
+                    kids.forEach((k, i) => { domH += k.offsetHeight + (i > 0 ? gap : 0); });
+                } catch (e) {
+                    domH = container.scrollHeight;
+                }
+                const expectH = expectedContentH(node._mlRows?.length || 1);
+                // 布局未完成时子元素高度会偏小（甚至只剩表头）。这时若写回 size，
+                // 窗口会被打回默认高度，随后真正渲染的内容全部冒出框外。偏小就当没测到，继续重试。
+                if (!domH || domH <= 0 || domH < expectH * 0.85) {
+                    // 元素可能尚未上屏（如工作流加载中 / 新 JS 冷启动）：持续重试。
+                    // 冷启动时布局就绪可能远超 1 秒，按文档加载状态给足重试窗口：
+                    // 文档未完成前最多 ~40 秒；完成后 ~10 秒兜底。
+                    node._mlMeasureTries = (node._mlMeasureTries || 0) + 1;
+                    const limit = document.readyState === "complete" ? 40 : 160;
+                    if (node._mlMeasureTries <= limit) {
+                        setTimeout(() => { try { node._mlApplySize(); } catch (e) { } }, 250);
+                    }
+                    return;
+                }
+                node._mlMeasureTries = 0;
+                node._mlContentH = domH;
+                node._mlSizeLock = true;
+                try {
+                    container.style.setProperty("--comfy-widget-min-height", Math.ceil(domH) + "px");
+                } catch (e) { }
+                // 顶部槽位区预留：2.0 约 60；经典模式基准 84（实测 76 + 8px 紧凑余量）。
+                // 一次性给足，避免"先小后补"的两段式高度跳变（视觉闪烁）；
+                // 若个别环境槽位更高导致溢出，由下方校正逻辑兜底，并把补量"学习"进
+                // CLASSIC_RESERVE —— 之后所有节点直接一步到位，不会再反复补。
+                const reserve = window.LiteGraph?.vueNodesMode ? VUE_RESERVE : CLASSIC_RESERVE;
+                const h = domH + reserve;
+                if (Math.abs(h - node.size[1]) > 1) {
+                    node.setSize([node.size[0], h]);
+                    app.graph.setDirtyCanvas(true, true);
+                }
+                // 经典模式：布局生效后再量一次 —— 若 DOM 底部超出节点框底部，则补增高度。
+                // （不同 litegraph 版本的"槽位区"高度不同，静态预留无法通吃，实测校正最稳）
+                if (!window.LiteGraph?.vueNodesMode) {
+                    requestAnimationFrame(() => {
+                        try {
+                            const gb = node.getBounding ? node.getBounding() : null;
+                            if (!gb) return;
+                            const cr = app.canvas.canvas.getBoundingClientRect();
+                            const scale = app.canvas.ds?.scale || 1;
+                            const offY = app.canvas.ds?.offset?.[1] ?? 0;
+                            // 屏幕 = canvas 原点 + (世界坐标 + 视图偏移) × 缩放
+                            const nodeBottomScreen = cr.top + (gb[1] + gb[3] + offY) * scale;
+                            const domBottom = container.getBoundingClientRect().bottom;
+                            const overflowScreen = domBottom - nodeBottomScreen;
+                            // 只处理"轻微溢出"：正常预留下溢出最多 ~10px；
+                            // 超过 40px 视为"测量基准异常"（如加载态的假溢出）直接忽略，
+                            // 更不允许把异常值学习进预留（否则造成"巨长/大空白"）。
+                            const overflowLayout = overflowScreen / scale;
+                            if (overflowLayout > 2 && overflowLayout < 40) {
+                                const add = Math.min(overflowLayout + 6, 200);
+                                CLASSIC_RESERVE = Math.min(CLASSIC_RESERVE + add, 200); // 学习（封顶 200）
+                                node.setSize([node.size[0], node.size[1] + add]);
+                                app.graph.setDirtyCanvas(true, true);
+                            }
+                        } catch (e) { }
+                    });
+                }
+            };
+            requestAnimationFrame(measure);
+            setTimeout(measure, 30);
+        };
+
+        // ---- 单个 LoRA 行 ----
+        const makeRow = (row, i) => {
+            const el = document.createElement("div");
+            el.style.cssText =
+                `display:flex;align-items:center;gap:${ROW_GAP}px;height:30px;padding:0 4px;` +
+                `border-radius:6px;box-sizing:border-box;flex-shrink:0;` +
+                `background:${row.enabled ? "#1a2a1a" : "#271818"};` +
+                `border:1px solid ${row.enabled ? "#2d5a2d" : "#5a2d2d"};`;
+
+            // 序号（输入数字排序）
+            const idx = document.createElement("input");
+            idx.type = "text";
+            idx.value = i + 1;
+            idx.title = T.order;
+            idx.style.cssText =
+                `width:${COL.order}px;height:22px;background:#1e1e28;color:#8a8a9a;flex-shrink:0;` +
+                `border:1px solid #35354a;border-radius:4px;text-align:center;font-size:11px;` +
+                `font-weight:bold;font-family:monospace;outline:none;box-sizing:border-box;padding:0;`;
+            idx.onfocus = () => { idx.style.borderColor = "#4a9eff"; idx.style.color = "#fff"; idx.select(); };
+            idx.onblur = () => { idx.style.borderColor = "#35354a"; idx.style.color = "#8a8a9a"; };
+            idx.onchange = () => {
+                const parsed = parseFloat(idx.value.trim());
+                const total = node._mlRows.length;
+                const current = i + 1;
+                if (!Number.isFinite(parsed)) { idx.value = current; return; }
+                let target = Math.round(parsed);
+                if (target <= 0) target = 1;
+                if (target > total) target = total;
+                if (target === current) { idx.value = current; return; }
+                const item = node._mlRows.splice(i, 1)[0];
+                node._mlRows.splice(target - 1, 0, item);
+                node._mlSync();
+                node._mlRender();
+            };
+            el.appendChild(idx);
+
+            // 开关胶囊
+            const tog = document.createElement("div");
+            tog.style.cssText = `width:${COL.toggle}px;flex-shrink:0;display:flex;justify-content:center;cursor:pointer;`;
+            const cap = document.createElement("div");
+            const paintCap = () => {
+                cap.style.cssText =
+                    `width:28px;height:16px;border-radius:8px;position:relative;transition:background .15s,border-color .15s;` +
+                    `background:${row.enabled ? "#2e7d32" : "#424242"};border:1px solid ${row.enabled ? "#43a047" : "#555"};`;
+                cap.innerHTML =
+                    `<div style="position:absolute;top:1px;left:${row.enabled ? "13px" : "1px"};` +
+                    `width:12px;height:12px;border-radius:50%;background:#fff;transition:left .15s;"></div>`;
+            };
+            paintCap();
+            tog.onclick = () => {
+                row.enabled = !row.enabled;
+                el.style.background = row.enabled ? "#1a2a1a" : "#271818";
+                el.style.borderColor = row.enabled ? "#2d5a2d" : "#5a2d2d";
+                paintCap();
+                node._mlSync();
+            };
+            tog.appendChild(cap);
+            el.appendChild(tog);
+
+            // LoRA 名（点击打开下拉；与触发词/备注按 2:1:1 弹性分配，拉宽时三者一起变宽）
+            const name = document.createElement("div");
+            name.style.cssText =
+                `flex:2 1 0;min-width:0;height:22px;line-height:20px;background:#252525;` +
+                `border:1px solid #3a3a3a;border-radius:4px;padding:0 6px;font-size:11.5px;` +
+                `white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;` +
+                `box-sizing:border-box;color:${row.lora === "None" ? "#555" : "#ddd"};`;
+            name.textContent = row.lora === "None" ? T.select : loraBasename(row.lora);
+            name.onmouseenter = () => { name.style.borderColor = "#5a5a5a"; };
+            name.onmouseleave = () => { name.style.borderColor = "#3a3a3a"; };
+            name.onclick = () => {
+                const rect = name.getBoundingClientRect();
+                domDropdown.show(loraList, row.lora, rect, (sel) => {
+                    row.lora = sel;
+                    if (sel !== "None") {
+                        try {
+                            const t = localStorage.getItem("lora_trigger_" + sel);
+                            row.trigger = t !== null ? t : "";
+                            const u = localStorage.getItem("lora_url_" + sel);
+                            row.url = u !== null ? u : "";
+                        } catch (e) { }
+                    } else {
+                        row.trigger = "";
+                        row.url = "";
+                    }
+                    name.textContent = sel === "None" ? T.select : loraBasename(sel);
+                    name.style.color = sel === "None" ? "#555" : "#ddd";
+                    trg.value = row.trigger;
+                    paintUrl();
+                    node._mlSync();
+                });
+            };
+            el.appendChild(name);
+
+            // 权重：[◀ 数值 ▶]，数值可拖拽微调、直接输入
+            const stWrap = document.createElement("div");
+            stWrap.style.cssText =
+                `width:${COL.strength}px;height:22px;background:#252525;border:1px solid #3a3a3a;` +
+                `border-radius:4px;display:flex;align-items:center;box-sizing:border-box;flex-shrink:0;overflow:hidden;`;
+            const mkArrow = (txt, delta) => {
+                const b = document.createElement("div");
+                b.textContent = txt;
+                b.style.cssText =
+                    `width:14px;flex-shrink:0;text-align:center;font-size:10px;color:#666;cursor:pointer;` +
+                    `user-select:none;line-height:20px;`;
+                b.onmouseenter = () => { b.style.color = "#aaa"; };
+                b.onmouseleave = () => { b.style.color = "#666"; };
+                b.onclick = () => {
+                    const v = Math.round(Math.min(100, Math.max(-100, row.strength + delta)) * 100) / 100;
+                    row.strength = v;
+                    num.value = v.toFixed(2);
+                    num.style.color = v === 1.0 ? "#aaa" : "#7ec8e3";
+                    node._mlSync();
+                };
+                return b;
+            };
+            const num = document.createElement("input");
+            num.type = "text";
+            num.value = row.strength.toFixed(2);
+            num.style.cssText =
+                `flex:1 1 auto;min-width:0;width:100%;background:transparent;border:none;outline:none;` +
+                `text-align:center;font-size:12px;font-family:'Courier New',monospace;padding:0;` +
+                `color:${row.strength === 1.0 ? "#aaa" : "#7ec8e3"};`;
+            num.onfocus = () => num.select();
+            num.onchange = () => {
+                let v = parseFloat(num.value);
+                if (!Number.isFinite(v)) v = row.strength;
+                v = Math.round(Math.min(100, Math.max(-100, v)) * 100) / 100;
+                row.strength = v;
+                num.value = v.toFixed(2);
+                num.style.color = v === 1.0 ? "#aaa" : "#7ec8e3";
+                node._mlSync();
+            };
+            num.onblur = () => { num.value = row.strength.toFixed(2); };
+            // 按住数值左右拖拽调整（1px ≈ 0.001）；单击则聚焦编辑。
+            // 关键：pointerdown 阻止默认行为 —— 否则输入的"文本选择/HTML5 拖拽"会抢走
+            // 手势（拖动时拖出 ghost 文本而非改数值）。单击（未拖动）在 pointerup 时
+            // 手动聚焦并全选，保持"点击直接输入"的便利。
+            num.addEventListener("dragstart", (e) => e.preventDefault());
+            num.addEventListener("pointerdown", (e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const startX = e.clientX;
+                const startVal = row.strength;
+                let dragging = false;
+                const onMove = (ev) => {
+                    const dx = ev.clientX - startX;
+                    if (!dragging) {
+                        if (Math.abs(dx) < 5) return;   // 阈值：点击时的手抖不算拖拽
+                        dragging = true;
+                        try { num.setPointerCapture(ev.pointerId); } catch (er) { }
+                        document.body.style.cursor = "ew-resize";
+                    }
+                    const v = Math.round(Math.min(100, Math.max(-100, startVal + dx * 0.001)) * 100) / 100;
+                    if (v !== row.strength) {
+                        row.strength = v;
+                        num.value = v.toFixed(2);
+                        num.style.color = v === 1.0 ? "#aaa" : "#7ec8e3";
+                        node._mlSync();
+                    }
+                };
+                const onUp = (ev) => {
+                    num.removeEventListener("pointermove", onMove);
+                    num.removeEventListener("pointerup", onUp);
+                    num.removeEventListener("pointercancel", onUp);
+                    document.body.style.cursor = "";
+                    if (dragging) {
+                        try { num.releasePointerCapture(ev.pointerId); } catch (er) { }
+                    } else {
+                        // 单击（未拖动）：聚焦并全选，直接输入覆盖
+                        num.focus();
+                        num.select();
+                    }
+                };
+                num.addEventListener("pointermove", onMove);
+                num.addEventListener("pointerup", onUp);
+                num.addEventListener("pointercancel", onUp);
+            });
+            stWrap.appendChild(mkArrow("◀", -0.01));
+            stWrap.appendChild(num);
+            stWrap.appendChild(mkArrow("▶", 0.01));
+            el.appendChild(stWrap);
+
+            // 触发词（弹性：与名字/备注按 3:1:1 分配剩余空间）
+            const trg = document.createElement("input");
+            trg.type = "text";
+            trg.value = row.trigger || "";
+            trg.placeholder = T.trigger_ph;
+            trg.style.cssText =
+                `flex:1 1 0;min-width:0;height:22px;background:#1e1e28;border:1px solid #35354a;` +
+                `border-radius:4px;padding:0 4px;font-size:10px;color:#e8c87e;outline:none;` +
+                `box-sizing:border-box;text-overflow:ellipsis;`;
+            trg.onfocus = () => { trg.style.borderColor = "#4a9eff"; };
+            trg.onblur = () => { trg.style.borderColor = "#35354a"; };
+            trg.oninput = () => {
+                row.trigger = trg.value;
+                if (row.lora !== "None") {
+                    try { localStorage.setItem("lora_trigger_" + row.lora, trg.value); } catch (e) { }
+                }
+                node._mlSync();
+            };
+            el.appendChild(trg);
+
+            // 备注（弹性：与名字/触发词按 3:1:1 分配剩余空间）
+            const note = document.createElement("input");
+            note.type = "text";
+            note.value = row.note || "";
+            note.placeholder = T.note_ph;
+            note.style.cssText =
+                `flex:1 1 0;min-width:0;height:22px;background:#1e1e28;border:1px solid #35354a;` +
+                `border-radius:4px;padding:0 4px;font-size:11px;color:#bbb;outline:none;` +
+                `box-sizing:border-box;text-overflow:ellipsis;`;
+            note.onfocus = () => { note.style.borderColor = "#4a9eff"; };
+            note.onblur = () => { note.style.borderColor = "#35354a"; };
+            note.oninput = () => { row.note = note.value; node._mlSync(); };
+            el.appendChild(note);
+
+            // 网址按钮：未配置=灰 ＋，已配置=绿 ↗（点击跳转；Shift+点击 / 无网址时编辑）
+            const urlBtn = document.createElement("button");
+            urlBtn.style.cssText =
+                `width:${COL.url}px;height:22px;border-radius:5px;cursor:pointer;font-size:11px;` +
+                `flex-shrink:0;line-height:1;font-weight:bold;padding:0;transition:filter .15s;`;
+            const paintUrl = () => {
+                const on = hasUrlRe.test((row.url || "").trim());
+                urlBtn.textContent = on ? "↗" : "＋";
+                urlBtn.style.background = on ? "#0f3a1a" : "#2a2a2a";
+                urlBtn.style.border = `1px solid ${on ? "#2e9e4f" : "#4a4a4a"}`;
+                urlBtn.style.color = on ? "#5ccf7a" : "#8a8a8a";
+            };
+            paintUrl();
+            urlBtn.onmouseenter = () => { urlBtn.style.filter = "brightness(1.3)"; };
+            urlBtn.onmouseleave = () => { urlBtn.style.filter = "none"; };
+            urlBtn.onclick = (e) => {
+                const url = row.url || "";
+                const setUrl = (val) => {
+                    row.url = (val || "").trim();
+                    if (row.lora !== "None") {
+                        try { localStorage.setItem("lora_url_" + row.lora, row.url); } catch (er) { }
+                    }
+                    paintUrl();
+                    node._mlSync();
+                };
+                if (hasUrlRe.test(url.trim())) {
+                    if (e.ctrlKey || e.shiftKey) {
+                        app.canvas.prompt(T.prompt_url, url, (val) => { setUrl(val); }, e);
+                    } else {
+                        window.open(url.trim(), "_blank");
+                    }
+                } else {
+                    app.canvas.prompt(T.prompt_url, url, (val) => { setUrl(val); }, e);
+                }
+            };
+            el.appendChild(urlBtn);
+
+            // 删除
+            const del = document.createElement("button");
+            del.textContent = "✕";
+            del.style.cssText =
+                `width:${COL.del}px;height:22px;background:#6a0000;color:#ff6b6b;flex-shrink:0;` +
+                `border:1px solid #c0392b;border-radius:5px;cursor:pointer;font-size:11px;` +
+                `line-height:1;font-weight:bold;padding:0;transition:filter .15s;`;
+            del.onmouseenter = () => { del.style.filter = "brightness(1.3)"; };
+            del.onmouseleave = () => { del.style.filter = "none"; };
+            del.onclick = () => {
+                const liveIdx = node._mlRows.indexOf(row);
+                if (liveIdx >= 0) node._mlRows.splice(liveIdx, 1);
+                node._mlSync();
+                node._mlRender();
+            };
+            el.appendChild(del);
+
+            return el;
+        };
+
+        // ---- 全量渲染 ----
+        node._mlRender = function () {
+            container.innerHTML = "";
+
+            // 表头
+            const header = document.createElement("div");
+            header.style.cssText =
+                `display:flex;align-items:center;gap:${ROW_GAP}px;padding:0 4px;height:16px;` +
+                `font-size:10px;color:#606060;font-weight:bold;box-sizing:border-box;flex-shrink:0;`;
+            const headCells = [
+                { t: T.order, w: COL.order, align: "center" },
+                { t: T.on_off, w: COL.toggle, align: "center" },
+                { t: T.lora, flex: "2 1 0", align: "left", pad: true },
+                { t: T.strength, w: COL.strength, align: "center" },
+                { t: T.trigger, flex: "1 1 0", align: "center" },
+                { t: T.note, flex: "1 1 0", align: "center" },
+                { t: T.url, w: COL.url, align: "center" },
+                { t: T.del, w: COL.del, align: "center" },
+            ];
+            for (const hc of headCells) {
+                const c = document.createElement("div");
+                c.textContent = hc.t;
+                c.style.cssText =
+                    `text-align:${hc.align};box-sizing:border-box;overflow:hidden;white-space:nowrap;` +
+                    (hc.flex
+                        ? `flex:${hc.flex};min-width:0;` + (hc.pad ? "padding-left:6px;" : "")
+                        : `width:${hc.w}px;flex-shrink:0;`);
+                header.appendChild(c);
+            }
+            container.appendChild(header);
+
+            // 行
+            node._mlRows.forEach((row, i) => {
+                container.appendChild(makeRow(row, i));
+            });
+
+            // 添加按钮
+            const addBtn = document.createElement("button");
+            addBtn.textContent = T.add;
+            addBtn.style.cssText =
+                `width:100%;padding:6px;background:#1e1e1e;color:#7c6cf0;border:1px solid #404040;` +
+                `border-radius:6px;cursor:pointer;font-size:13px;font-weight:bold;flex-shrink:0;transition:filter .15s;`;
+            addBtn.onmouseenter = () => { addBtn.style.filter = "brightness(1.3)"; };
+            addBtn.onmouseleave = () => { addBtn.style.filter = "none"; };
+            addBtn.onclick = () => {
+                node._mlRows.push({ enabled: true, lora: "None", strength: 1.0, trigger: "", note: "", url: "" });
+                node._mlSync();
+                node._mlRender();
+            };
+            container.appendChild(addBtn);
+
+            node._mlApplySize();
+            // 布局稳定后复测一次（纠正初次测量可能受画布布局影响的偏差）
+            setTimeout(() => { try { node._mlApplySize(); } catch (e) { } }, 350);
+            // 更晚的兜底复测：个别加载时序（如模式切换后首载）下，早期测量可能偏小，
+            // 页面完全就绪后再校正一次（一次性，非轮询）。
+            setTimeout(() => { try { node._mlApplySize(); } catch (e) { } }, 1600);
+        };
+
+        // configure 发生在渲染函数定义之前时，只记了一笔；这里把行数据补上再画
+        if (pendingRefit) {
+            pendingRefit = false;
+            const parsed = parseRows(stackWidget?.value);
+            if (parsed) node._mlRows = parsed;
+        }
+
+        // 初次渲染 + 复查（防止 configure 恢复数据晚于渲染）。
+        // 双通道调度：窗口无焦点/被遮挡时 rAF 可能被节流甚至停帧，
+        // setTimeout 兜底保证首渲染与校正不被拖延（二者只执行其一）。
+        let _mlInitRendered = false;
+        const firstRender = () => {
+            if (_mlInitRendered) return;
+            _mlInitRendered = true;
+            node._mlRender();
+            const verify = () => {
+                const parsed = parseRows(stackWidget?.value);
+                if (parsed && JSON.stringify(parsed) !== JSON.stringify(node._mlRows)) {
+                    node._mlRows = parsed;
+                    node._mlRender();
+                }
+            };
+            requestAnimationFrame(verify);
+            setTimeout(verify, 80);
+        };
+        requestAnimationFrame(firstRender);
+        setTimeout(firstRender, 0);
     }
 });

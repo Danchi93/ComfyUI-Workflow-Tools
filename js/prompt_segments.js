@@ -11,6 +11,9 @@ const I18N = {
 };
 const T = I18N[LANG] ?? I18N.en;
 
+// 最小宽度：文字/输入框不挤爆
+const NODE_MIN_W = 400;
+
 var _TAG_DICT = [];
 var _TAG_READY = false;
 (function () {
@@ -200,6 +203,9 @@ app.registerExtension({
                 const taBase = "width:100%;background:#181820;color:#ddd;border:none;border-top:1px solid #2a2a3a;padding:6px 8px;font-size:12px;resize:none;box-sizing:border-box;outline:none;font-family:monospace;line-height:1.5;";
                 if (!seg.enabled) {
                     ta.style.cssText = taBase + "height:64px;min-height:64px;overflow:hidden;opacity:0.4;";
+                    // 禁用状态下也保持数据同步：否则在禁用时输入的内容，
+                    // 重新启用后会被 _render() 用旧的 seg.text 覆盖（内容丢失）
+                    ta.oninput = () => { seg.text = ta.value; this._sync(); };
                 } else {
                     ta.style.cssText = taBase + "min-height:64px;height:64px;overflow:hidden;";
                     ta.onfocus = () => { ta.style.background = "#1c1c28"; suggestStrip.style.display = "none"; this._applySize(); };
@@ -234,6 +240,12 @@ app.registerExtension({
                             e.preventDefault();
                             var idx = ta._suggestIdx >= 0 ? ta._suggestIdx : 0;
                             if (chips[idx]) chips[idx].click();
+                            return;
+                        }
+                        // 已用方向键选中某条建议时，回车 = 补全（而不是换行）
+                        if (e.key === "Enter" && ta._suggestIdx >= 0) {
+                            e.preventDefault();
+                            if (chips[ta._suggestIdx]) chips[ta._suggestIdx].click();
                             return;
                         }
                         if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -336,7 +348,7 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function () {
             onNodeCreated?.apply(this, arguments);
 
-            this.size[0] = Math.max(this.size[0], 400);
+            this.size = [Math.max(this.size[0], NODE_MIN_W), this.size[1]];
             this._domContentH = 0;
 
             const raw = this.widgets?.find(w => w.name === "segments");
@@ -350,12 +362,17 @@ app.registerExtension({
             this._segments = [{ enabled: true, label: T.default_label, text: "" }];
 
             const container = document.createElement("div");
-            container.style.cssText = "display:flex;flex-direction:column;gap:4px;padding:4px;box-sizing:border-box;width:100%;position:relative;";
+            // flex:0 0 auto —— 防止 Nodes 2.0 下被 WidgetDOM 容器（*:flex-1）拉伸，
+            // 导致 scrollHeight 测量失真、节点高度无法收缩（经典模式此属性无副作用）。
+            container.style.cssText = "display:flex;flex-direction:column;gap:4px;padding:4px;box-sizing:border-box;width:100%;position:relative;flex:0 0 auto;";
             this._segContainer = container;
 
             this._domWidget = this.addDOMWidget("_ui", "div", container, { serialize: false });
 
+            // 拖拽缩放限制：宽度不小于 NODE_MIN_W（防止文字出框）；高度不小于内容高度。
+            // 注意：这是本节点唯一的 onResize（不要在其他地方再覆盖）。
             this.onResize = function (size) {
+                if (size[0] < NODE_MIN_W) size[0] = NODE_MIN_W;
                 if (this._minH && size[1] < this._minH) size[1] = this._minH;
             };
 

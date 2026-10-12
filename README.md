@@ -106,3 +106,21 @@ Quickly switch between pre-configured resolutions without manually re-typing dim
 ### Usage
 
 Add the **Resolution Switcher** node. Pre-set your frequently used dimensions, toggle the one you want, and connect the **Latent** output to your KSampler or any node that accepts latent input.
+
+---
+
+## Video Frame Extractor
+
+Pick a single frame from a video and export it as an image — with a built-in preview player and timeline.
+
+### Features
+
+- Choose a video from the ComfyUI input folder (dropdown), upload one, or paste an absolute path
+- Built-in video preview with a draggable timeline — seek to any frame and see it instantly
+- Frame number input box — type a frame index directly and the timeline/preview follow
+- Upload via the button or by dropping a video file onto the node (large files are chunk-uploaded)
+- Outputs the selected frame as an IMAGE; a PNG copy is also saved to ComfyUI's output directory
+
+### Usage
+
+Add the **Video Frame Extractor** node, pick or upload a video, then set the target frame (type the frame number or drag the timeline). Connect the **image** output to a Preview/Save Image node or any node that accepts an image.

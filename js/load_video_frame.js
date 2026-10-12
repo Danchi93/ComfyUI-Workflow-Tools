@@ -11,6 +11,36 @@ const NODE_CLASS = "VideoFrameExtractor";
 const VIDEO_EXT_RE = /\.(mp4|webm|mkv|avi|mov|m4v|flv|wmv|mpg|mpeg|ts|gif)$/i;
 const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB/块，绕过 /upload/image 的请求体大小限制
 
+// ---------- 渲染模式热切换监听（1.0 ⇄ 2.0 不重载页面） ----------
+// ComfyUI 里切换 "Comfy.VueNodes.Enabled" 是热切换：节点不重建，DOM 结构停留在创建时的
+// 模式，会与新渲染器错配（2.0 里跑 1.0 结构 → inner 溢出、盖住底部角标；
+// 1.0 里跑 2.0 结构 → 平台按小占位压高度 + overflow:hidden → 内容整块被裁）。
+// 监听 LiteGraph.vueNodesMode 的变化（前端唯一写入点），通知各节点做样式适配。
+const modeChangeListeners = new Set();
+function onRenderModeChange(fn) { modeChangeListeners.add(fn); }
+function hookVueNodesMode() {
+    const LG = window.LiteGraph;
+    if (!LG || LG._vfModeHooked) return;
+    LG._vfModeHooked = true;
+    let current = LG.vueNodesMode;
+    try {
+        Object.defineProperty(LG, "vueNodesMode", {
+            configurable: true,
+            get() { return current; },
+            set(v) {
+                const changed = current !== v;
+                current = v;
+                if (changed) {
+                    for (const fn of modeChangeListeners) {
+                        try { fn(!!v); } catch (e) { }
+                    }
+                }
+            },
+        });
+    } catch (e) { }
+}
+hookVueNodesMode();
+
 // 与后端保持一致的改名规则（去路径、去非法字符）
 const sanitizeName = (name) => (name || "")
     .replace(/\\/g, "/")
@@ -66,36 +96,84 @@ app.registerExtension({
         });
 
         // ====================================================================
-        // DOM 结构
+        // DOM 结构 —— 两种模式两套布局策略：
+        // - Nodes 2.0：全权交给平台布局（官方 DOM widget 机制：widget 行 auto +
+        //   widgets 区 flex:1 吸收节点剩余空间）。我们的元素 flex 填满分配空间、
+        //   视频区 flex 吸收剩余高度，零 JS 尺寸管理（无 syncLayout/无观察器）。
+        // - 经典模式(1.0)：画布覆盖层无布局流，沿用"零高度挂载点 + absolute 内层 +
+        //   手工按节点尺寸分配"的老路径，行为与之前完全一致。
         // ====================================================================
+        const IS_VUE2 = !!(window.LiteGraph && window.LiteGraph.vueNodesMode);
+
         const container = document.createElement("div");
-        Object.assign(container.style, {
-            display: "flex",
-            flexDirection: "column",
-            gap: "6px",
-            width: "100%",
-            boxSizing: "border-box",
-            padding: "8px",
-            background: "rgba(28, 28, 30, 0.85)",
-            borderRadius: "6px",
-            color: "#ddd",
-            fontFamily: "sans-serif",
-        });
+        if (IS_VUE2) {
+            Object.assign(container.style, {
+                display: "flex",
+                flexDirection: "column",
+                gap: "6px",
+                padding: "8px",
+                boxSizing: "border-box",
+                width: "100%",
+                minHeight: "0",
+                background: "rgba(28, 28, 30, 0.85)",
+                borderRadius: "6px",
+                color: "#ddd",
+                fontFamily: "sans-serif",
+                overflow: "hidden",
+            });
+            // 官方契约（DOMWidget.computeLayoutSize）：widget 的最小高度 → 拖拽下限；
+            // 节点缩小时"视频区让位、底部控件区完整可见"。
+            container.style.setProperty("--comfy-widget-min-height", "130");
+        } else {
+            Object.assign(container.style, {
+                position: "relative",
+                width: "100%",
+                boxSizing: "border-box",
+            });
+        }
+
+        // 2.0：内容直接放 container（平台管布局）；1.0：放 absolute 的 inner（手工分配高度）
+        const inner = IS_VUE2 ? container : document.createElement("div");
+        if (!IS_VUE2) {
+            Object.assign(inner.style, {
+                position: "absolute",
+                top: "0",
+                left: "0",
+                width: "100%",
+                display: "flex",
+                flexDirection: "column",
+                gap: "6px",
+                boxSizing: "border-box",
+                padding: "8px",
+                background: "rgba(28, 28, 30, 0.85)",
+                borderRadius: "6px",
+                color: "#ddd",
+                fontFamily: "sans-serif",
+                overflow: "hidden",
+            });
+            container.appendChild(inner);
+        }
 
         // --- 视频预览区 ---
         const videoWrap = document.createElement("div");
         Object.assign(videoWrap.style, {
             position: "relative",
             width: "100%",
-            height: "260px",
             background: "#000",
             borderRadius: "4px",
             overflow: "hidden",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            flexShrink: "0",
         });
+        if (IS_VUE2) {
+            // 吸收节点剩余高度（平台分配多少吃多少），最小可压缩到 0
+            videoWrap.style.flex = "1 1 0";
+            videoWrap.style.minHeight = "0";
+        } else {
+            videoWrap.style.height = "260px";
+            videoWrap.style.flexShrink = "0";
+        }
 
         const videoEl = document.createElement("video");
         Object.assign(videoEl.style, {
@@ -104,6 +182,11 @@ app.registerExtension({
             objectFit: "contain",
             outline: "none",
         });
+        if (IS_VUE2) {
+            // 绝对定位：避免视频"内在尺寸"以 min-content 形式撑开整条布局链
+            videoEl.style.position = "absolute";
+            videoEl.style.inset = "0";
+        }
         videoEl.muted = true;
         videoEl.preload = "auto";
         videoWrap.appendChild(videoEl);
@@ -117,7 +200,7 @@ app.registerExtension({
             pointerEvents: "none",
         });
         videoWrap.appendChild(placeholder);
-        container.appendChild(videoWrap);
+        inner.appendChild(videoWrap);
 
         // --- 帧号 + 信息行 ---
         const row = document.createElement("div");
@@ -165,7 +248,7 @@ app.registerExtension({
         });
 
         row.append(labelFrame, numInput, totalSpan, infoSpan);
-        container.appendChild(row);
+        inner.appendChild(row);
 
         // --- 时间轴 ---
         const slider = document.createElement("input");
@@ -180,7 +263,7 @@ app.registerExtension({
             accentColor: "#4a8ad4",
             flexShrink: "0",
         });
-        container.appendChild(slider);
+        inner.appendChild(slider);
 
         // --- 上传按钮 + 状态行 ---
         const bottomRow = document.createElement("div");
@@ -198,8 +281,8 @@ app.registerExtension({
             color: "#bbb",
             border: "1px solid #484848",
             borderRadius: "4px",
-            padding: "3px 10px",
-            fontSize: "12px",
+            padding: "4px 14px",
+            fontSize: "13px",
             cursor: "pointer",
             flexShrink: "0",
         });
@@ -216,38 +299,81 @@ app.registerExtension({
         });
 
         bottomRow.append(uploadBtn, statusEl);
-        container.appendChild(bottomRow);
+        inner.appendChild(bottomRow);
 
         // 布局常量：
         // - FIXED_BOTTOM：视频区下方的固定控件区（帧号行/时间轴/按钮行/间距/内边距）
-        // - DOM_MIN_VIDEO：视频区最小高度
-        // - DOM_PLACEHOLDER_H：DOM 的布局占位高度，必须是固定值！
+        // - DOM_MIN_VIDEO：视频区最小高度。取小值，节点缩小时"视频区让位、底部控件常驻"；
+        //   若保底太大，节点缩小时容器反而超出节点框（经典模式被裁、2.0 下锁死最小尺寸）
+        // - DOM_PLACEHOLDER_H：布局占位基准，必须是固定值！
         //   （若动态跟随节点高度，前端缩放限制会与它互相锁死，导致节点只能放大不能缩小）
         const FIXED_BOTTOM = 112;
-        const DOM_MIN_VIDEO = 160;
-        const DOM_PLACEHOLDER_H = DOM_MIN_VIDEO + FIXED_BOTTOM;
+        const DOM_MIN_VIDEO = 40;
+        const DOM_PLACEHOLDER_H = 272;
         let videoH = 260;
 
         const domWidget = node.addDOMWidget("vfx_ui", "div", container);
         if (domWidget) {
-            domWidget.computeSize = (w) => [w, DOM_PLACEHOLDER_H];
+            // 动态占位高度：
+            // - Nodes 2.0：小占位（若报"视频区+控件区"的大高度会被锁死最小尺寸，只能放大不能缩小）
+            // - 经典模式：给足高度，避免"2.0 结构节点热切回 1.0"时被小占位压扁、内容整块被裁
+            domWidget.computeSize = (w) => {
+                try {
+                    const vue = !!(window.LiteGraph && window.LiteGraph.vueNodesMode);
+                    if (vue) return [w, 40];
+                    const first = container.firstElementChild;
+                    if (first && first !== container) {
+                        // 1.0 结构：恒定小占位。
+                        // 注意：不能返回 inner 实际高度——litegraph 拖拽 resize 会把
+                        // computeSize()[1] 当作"最小高度"clamp，动态值会让"缩小"每步
+                        // 只能缩到上次内容高度（龟速、跟不上鼠标）；固定小值则手感顺滑。
+                        return [w, 40];
+                    }
+                    // 2.0 结构（热切回 1.0 的过渡态）：给足高度避免内容被压扁
+                    return [w, 40 + FIXED_BOTTOM + 160];
+                } catch (e) { return [w, 40]; }
+            };
         }
 
-        // 宽度与视频区高度跟随节点尺寸（只调整 DOM 元素自身，不动布局占位）
+        // 头顶区高度（节点顶到 DOM 容器顶，布局单位）：取 litegraph 绘制 widget 时写入的
+        // last_y（节点首次绘制后可用）。仅经典模式使用（2.0 下 syncLayout 直接返回）。
+        const getDomY = () => {
+            return domWidget && typeof domWidget.last_y === "number" ? domWidget.last_y : 0;
+        };
+
+        // 宽度与视频区高度跟随节点尺寸（仅经典模式）。
+        // Nodes 2.0 下平台全权管理布局（flex 链自动分配空间），此处不做任何手工同步。
+        // 注意：这里动态读取渲染模式（而非创建时的 IS_VUE2 常量）——热切换后节点不重建，
+        // 常量会"定格"，导致切回 1.0 后 syncLayout 不再运行、布局无人管理。
         const syncLayout = () => {
-            const w = Math.max(200, (node.size?.[0] || 470) - 30);
+            if (window.LiteGraph && window.LiteGraph.vueNodesMode) return;
+            let w = Math.max(200, (node.size?.[0] || 470) - 30);
             container.style.width = `${w}px`;
             container.style.maxWidth = `${w}px`;
 
-            const domY = domWidget && typeof domWidget.last_y === "number" ? domWidget.last_y : 0;
+            const domY = getDomY();
             let target = videoH;
             if (domY > 0) {
+                // 视频区 = 节点可用高度 - 头顶区 - 底部固定控件区 - 余量
                 target = node.size[1] - domY - FIXED_BOTTOM - 8;
             }
             target = Math.max(DOM_MIN_VIDEO, Math.min(target, 4000));
             if (Math.abs(target - videoH) > 1) videoH = target;
             videoWrap.style.height = `${videoH}px`;
-            container.style.height = `${videoH + FIXED_BOTTOM}px`;
+            // 高度写到 inner（absolute 层）：容器本身保持零高度，绝不参与
+            // "内容自然高"，避免布局系统用旧内容高锁死节点尺寸。
+            let totalH = videoH + FIXED_BOTTOM;
+            if (domY > 0) {
+                const avail = (node.size?.[1] || 470) - domY - 14;
+                totalH = Math.min(totalH, Math.max(0, avail));
+            }
+            inner.style.height = `${totalH}px`;
+            // 上传按钮随节点宽度温和放大（节点拉大后仍显眼）
+            try {
+                const bs = Math.min(1.6, Math.max(1, w / 700));
+                uploadBtn.style.fontSize = `${(13 * bs).toFixed(1)}px`;
+                uploadBtn.style.padding = `${(4 * bs).toFixed(1)}px ${(14 * bs).toFixed(1)}px`;
+            } catch (e) { }
         };
         const origOnResize = node.onResize;
         node.onResize = function () {
@@ -255,6 +381,71 @@ app.registerExtension({
             syncLayout();
             return r;
         };
+
+        // 渲染模式热切换适配（样式层）：让"创建时的结构"在"新渲染器"下也能正常布局。
+        // - 切到 2.0：内容入流（去掉 absolute+手动高度），视频区交 flex 吸收
+        // - 切回 1.0：恢复"零高度挂载点 + absolute inner + 手动高度"，并按节点尺寸重排
+        const adaptToMode = () => {
+            try {
+                const vue = !!(window.LiteGraph && window.LiteGraph.vueNodesMode);
+                const hasInner = inner !== container;
+                if (vue) {
+                    // container 改为 flex 列，让 inner 能伸展到平台分配的空间
+                    container.style.display = "flex";
+                    container.style.flexDirection = "column";
+                    container.style.minHeight = "0";
+                    if (hasInner) {
+                        inner.style.position = "static";
+                        inner.style.height = "auto";
+                        inner.style.width = "100%";
+                        inner.style.flex = "1 1 auto";
+                        inner.style.minHeight = "0";
+                    }
+                    container.style.width = "100%";
+                    container.style.maxWidth = "";
+                    container.style.setProperty("--comfy-widget-min-height", "130");
+                    videoEl.style.position = "absolute";
+                    videoEl.style.inset = "0";
+                    videoWrap.style.flex = "1 1 0";
+                    videoWrap.style.minHeight = "0";
+                    videoWrap.style.height = "";
+                    // 布局由平台驱动：轻推一次同值尺寸请它重算
+                    try { node.setSize([node.size[0], node.size[1]]); } catch (e) { }
+                } else {
+                    if (hasInner) {
+                        // 还原"零高度挂载点 + absolute inner"的经典结构
+                        inner.style.position = "absolute";
+                        inner.style.top = "0";
+                        inner.style.left = "0";
+                        inner.style.width = "100%";
+                        inner.style.height = "";   // 清空，syncLayout 会重新分配
+                        inner.style.flex = "";
+                        inner.style.minHeight = "";
+                        container.style.display = "";
+                        container.style.flexDirection = "";
+                        container.style.minHeight = "";
+                    }
+                    container.style.setProperty("--comfy-widget-min-height", "");
+                    videoEl.style.position = "";
+                    videoEl.style.inset = "";
+                    videoWrap.style.flex = "";
+                    videoWrap.style.minHeight = "";
+                    videoWrap.style.height = "260px";
+                    syncLayout();
+                    app.canvas?.setDirty(true, true);
+                }
+            } catch (e) { }
+        };
+        node._vfAdaptToMode = adaptToMode;
+        const modeListener = () => {
+            hookVueNodesMode(); // 兜底：模块顶层执行时 LiteGraph 可能尚未就绪
+            // 平台切换布局可能稍晚到位，幂等执行两次
+            setTimeout(() => { try { adaptToMode(); } catch (e) { } }, 0);
+            setTimeout(() => { try { adaptToMode(); } catch (e) { } }, 200);
+        };
+        node._vfModeListener = modeListener;
+        onRenderModeChange(modeListener);
+        hookVueNodesMode();
         // 个别前端版本会重置 DOM 高度：绘制时轻量检查并修复
         const origOnDrawForeground = node.onDrawForeground;
         node.onDrawForeground = function (ctx) {
@@ -266,6 +457,59 @@ app.registerExtension({
             }
             return r;
         };
+
+        // （Nodes 2.0 的布局由平台管理：widget 行 auto + widgets 区 flex:1，
+        //   我们的元素随分配空间自动伸缩，无需任何 JS 触发/同步机制。）
+
+        if (IS_VUE2) {
+            // 个别加载时序下平台首帧布局可能未收敛（症状：面板底部超出节点框、遮住底部角标，
+            // 手动拉一下才恢复）。稳妥兜底：主动"轻推"尺寸请平台重算布局。
+            // - 调度与 rAF 解耦：页面无焦点/被遮挡时 rAF 会被节流甚至停帧，嵌套 rAF 的轻推
+            //   会迟到或永不执行——这正是遮角标长时间挂着的原因；setTimeout 兜底保证必达。
+            // - 微扰推：制造 2px 的真实差异再立即还原（等价于用户手动拉一下），
+            //   强制"差异驱动"的布局系统重算；瞬时无感。
+            // 仅有限几次、无轮询。
+            const nudge = (perturb) => {
+                try {
+                    if (!container.isConnected || !node.graph) return;
+                    const w = node.size[0], h = node.size[1];
+                    if (perturb) {
+                        node.setSize([w, h + 2]);
+                        const restore = () => { try { node.setSize([w, h]); } catch (e) { } };
+                        requestAnimationFrame(restore);
+                        setTimeout(restore, 30);
+                    } else {
+                        node.setSize([w, h]);
+                    }
+                } catch (e) { }
+            };
+            let nudgedFirst = false;
+            const nudgeFirst = () => {
+                if (nudgedFirst) return;
+                nudgedFirst = true;
+                nudge(false);
+            };
+            requestAnimationFrame(() => requestAnimationFrame(nudgeFirst));
+            setTimeout(nudgeFirst, 60);
+            // 首帧收敛兜底（微扰，最可能生效的时点），稍晚再补两次
+            setTimeout(() => nudge(true), 350);
+            setTimeout(() => nudge(false), 900);
+            setTimeout(() => nudge(true), 1800);
+            // 页面先前被遮挡/后台加载时，节点进入视口那一刻再补一次（一次性，非轮询）
+            if ("IntersectionObserver" in window) {
+                try {
+                    const io = new IntersectionObserver((entries) => {
+                        for (const e of entries) {
+                            if (e.isIntersecting) { nudge(true); io.disconnect(); node._vfNudgeIO = null; break; }
+                        }
+                    }, { threshold: 0 });
+                    node._vfNudgeIO = io;
+                    const ioAttach = () => { try { io.observe(container); } catch (e) { } };
+                    requestAnimationFrame(ioAttach);
+                    setTimeout(ioAttach, 0);
+                } catch (e) { }
+            }
+        }
 
         // ====================================================================
         // 状态与交互逻辑
@@ -509,6 +753,27 @@ app.registerExtension({
         const origOnConfigure = node.onConfigure;
         node.onConfigure = function (info) {
             const r = origOnConfigure ? origOnConfigure.apply(this, arguments) : undefined;
+            // 经典模式：存档尺寸可能很小（如从 Nodes 2.0 切回），而初始校正链挂在 rAF 上——
+            // 加载繁忙/后台标签等时序下 rAF 会迟到，窗口被内容顶出、底部控件被裁会持续很久。
+            // 这里在首次 configure 时同步抬到合理下限（30ms 后再核对一次，避开赋值顺序），
+            // 之后不再干预（不干扰用户手动缩放与撤销）。
+            if (!IS_VUE2 && !this._vfFirstConfigure) {
+                this._vfFirstConfigure = true;
+                const fix = () => {
+                    try {
+                        const curW = this.size?.[0] || 0;
+                        const curH = this.size?.[1] || 0;
+                        const w = Math.max(curW, 500);
+                        const h = Math.max(curH, DOM_PLACEHOLDER_H + 130);
+                        if (w !== curW || h !== curH) {
+                            this.setSize([w, h]);
+                            app.canvas?.setDirty(true, true);
+                        }
+                    } catch (e) { }
+                };
+                fix();
+                setTimeout(fix, 30);
+            }
             setTimeout(refreshVideo, 50);
             return r;
         };
@@ -517,19 +782,47 @@ app.registerExtension({
         node.onRemoved = function () {
             api.removeEventListener("executed", onExecuted);
             if (fileInput.parentNode) fileInput.parentNode.removeChild(fileInput);
+            if (node._vfModeListener) modeChangeListeners.delete(node._vfModeListener);
+            if (node._vfNudgeIO) { try { node._vfNudgeIO.disconnect(); } catch (e) { } node._vfNudgeIO = null; }
             if (origOnRemoved) origOnRemoved.apply(this, arguments);
         };
 
-        // 初始化尺寸与预览
-        requestAnimationFrame(() => {
-            syncLayout();
-            const min = node.computeSize();
-            const w = Math.max(node.size[0], 500, min[0]);
-            // 初始高度：在固定占位外多留 130px，让视频区初始约 280px 高
-            const h = Math.max(node.size[1], min[1] + 130);
-            node.setSize([w, h]);
-            app.canvas?.setDirty(true, true);
+        // 初始化尺寸与预览（双通道：正常走 rAF；加载繁忙/后台标签导致 rAF 冻结时
+        // 用 setTimeout 兜底触发，避免"窗口小、内容顶出"的错误状态持续很久）
+        let _vfInitDone = false;
+        const initVideoNode = () => {
+            if (_vfInitDone) return;
+            _vfInitDone = true;
+            if (!IS_VUE2) {
+                // 经典模式：手工分配合适的初始尺寸（2.0 由平台按内容/布局管理，无需干预）
+                syncLayout();
+                let min = [0, 0];
+                try { min = node.computeSize() || min; } catch (e) { }
+                const w = Math.max(node.size[0] || 0, 500, min[0] || 0);
+                // 初始高度：视频区初始约 280px 高（固定占位基准 272 + 130 余量；写死，不依赖占位值）
+                const h = Math.max(node.size[1] || 0, DOM_PLACEHOLDER_H + 130);
+                node.setSize([w, h]);
+                app.canvas?.setDirty(true, true);
+                // 二段校正：头顶区实际高度测出后，保证节点高度容得下"视频区 + 底部控件"
+                const second = () => {
+                    try {
+                        const domY = getDomY();
+                        if (domY > 0) {
+                            const want = domY + DOM_PLACEHOLDER_H + 20;
+                            if (want > node.size[1]) {
+                                node.setSize([node.size[0], want]);
+                                app.canvas?.setDirty(true, true);
+                            }
+                        }
+                        syncLayout();
+                    } catch (e) { }
+                };
+                requestAnimationFrame(second);
+                setTimeout(second, 60);
+            }
             refreshVideo();
-        });
+        };
+        requestAnimationFrame(initVideoNode);
+        setTimeout(initVideoNode, 40);
     },
 });
